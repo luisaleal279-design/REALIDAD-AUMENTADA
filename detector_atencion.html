@@ -1,0 +1,1114 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Detector de Atención AR</title>
+    
+    <!-- Import map para Three.js -->
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+        }
+      }
+    </script>
+
+    <!-- Diseño y Estilos -->
+    <style>
+        :root {
+            --primary: #00ffcc;
+            --bg-dark: rgba(10, 10, 15, 0.85);
+            --glass-bg: rgba(20, 20, 30, 0.6);
+            --glass-border: rgba(0, 255, 204, 0.3);
+            --alert: #ff3366;
+            --text: #ffffff;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #050505;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            color: var(--text);
+        }
+
+        /* Contenedor de Video y Canvas */
+        #video-container {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1;
+        }
+
+        #three_canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        video, canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            /* Efecto espejo para la cámara */
+            transform: scaleX(-1); 
+        }
+
+        #webcam {
+            opacity: 0.05; /* Oscurece el video casi por completo para destacar las constelaciones */
+        }
+
+        /* Capa de Interfaz de Usuario */
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 10;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            /* Deja pasar los clics hacia los elementos interactivos */
+            pointer-events: none; 
+        }
+
+        /* Paneles con Glassmorphism */
+        .panel {
+            background: var(--glass-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: 16px;
+            padding: 20px 30px;
+            margin: 30px;
+            text-align: center;
+            pointer-events: auto; /* Elementos interactivos */
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+            transition: all 0.3s ease;
+        }
+
+        .header-panel {
+            align-self: center;
+            min-width: 320px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: 1.5rem;
+            color: var(--primary);
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            text-shadow: 0 0 10px rgba(0, 255, 204, 0.5);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: bold;
+            margin-top: 12px;
+            background: rgba(0, 255, 204, 0.1);
+            color: var(--primary);
+            border: 1px solid var(--primary);
+            transition: all 0.3s;
+        }
+
+        /* Panel de Alerta (Oculto por defecto) */
+        .alert-panel {
+            position: absolute;
+            bottom: 120px;
+            left: 50%;
+            margin: 0;
+            background: rgba(255, 51, 102, 0.15);
+            border: 2px solid var(--alert);
+            opacity: 0;
+            transform: translateX(-50%) translateY(30px);
+            visibility: hidden;
+        }
+
+        .alert-panel.active {
+            opacity: 1;
+            visibility: visible;
+            transform: translateX(-50%) translateY(0);
+            animation: pulse-alert 1.5s infinite alternate;
+        }
+
+        .alert-panel h2 {
+            color: var(--alert);
+            margin: 0 0 10px 0;
+            font-size: 1.8rem;
+            text-shadow: 0 0 15px rgba(255, 51, 102, 0.6);
+        }
+
+        .alert-panel p {
+            margin: 0;
+            font-size: 1.1rem;
+            letter-spacing: 0.5px;
+        }
+
+        @keyframes pulse-alert {
+            0% { box-shadow: 0 0 15px rgba(255, 51, 102, 0.3); }
+            100% { box-shadow: 0 0 35px rgba(255, 51, 102, 0.8); }
+        }
+
+        /* Botón de Inicio */
+        .btn-start {
+            background: transparent;
+            color: var(--primary);
+            border: 2px solid var(--primary);
+            padding: 12px 28px;
+            font-size: 1.1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: bold;
+            transition: all 0.3s;
+            margin-top: 20px;
+            display: inline-block;
+        }
+
+        .btn-start:hover {
+            background: var(--primary);
+            color: #000;
+            box-shadow: 0 0 20px var(--primary);
+        }
+
+        .btn-start.hidden {
+            display: none;
+        }
+
+        .btn-stop {
+            position: absolute;
+            bottom: 40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(20, 20, 30, 0.8);
+            backdrop-filter: blur(10px);
+            color: var(--alert);
+            border: 2px solid var(--alert);
+            padding: 12px 30px;
+            font-size: 1.1rem;
+            border-radius: 30px;
+            cursor: pointer;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            font-weight: bold;
+            transition: all 0.3s;
+            display: inline-block;
+            pointer-events: auto;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            z-index: 20;
+        }
+
+        .btn-stop:hover {
+            background: var(--alert);
+            color: #000;
+            box-shadow: 0 0 25px var(--alert);
+            transform: translateX(-50%) scale(1.05);
+        }
+
+        .btn-stop.hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Contenedor del video y canvas -->
+    <div id="video-container">
+        <video id="webcam" autoplay playsinline></video>
+        <canvas id="output_canvas"></canvas>
+        <canvas id="three_canvas"></canvas>
+    </div>
+
+    <!-- Capa Holográfica de Interfaz -->
+    <div id="ui-layer">
+        <!-- Encabezado -->
+        <div class="panel header-panel">
+            <h1>Detector de Atención</h1>
+            <div id="status-badge" class="status-badge">Esperando Inicio...</div>
+            <br>
+            <button id="start-btn" class="btn-start">Comenzar Análisis</button>
+        </div>
+
+        <!-- Alerta de Distracción -->
+        <div id="alert-panel" class="panel alert-panel">
+            <h2>¡ATENCIÓN REQUERIDA!</h2>
+            <p>Por favor, mire al centro de la pantalla.</p>
+        </div>
+
+        <!-- Controles Inferiores -->
+        <button id="stop-btn" class="btn-stop hidden">Detener Análisis</button>
+    </div>
+
+    <!-- Scripts y Lógica de la Aplicación -->
+    <script type="module">
+        import { FaceLandmarker, HandLandmarker, FilesetResolver, DrawingUtils } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
+        import * as THREE from "three";
+
+        // ==========================================
+        // 1. Módulo: Camera Manager
+        // ==========================================
+        class CameraManager {
+            constructor(videoElement) {
+                this.video = videoElement;
+                this.stream = null;
+            }
+
+            async start() {
+                try {
+                    this.stream = await navigator.mediaDevices.getUserMedia({ 
+                        video: { width: 1280, height: 720, facingMode: "user" } 
+                    });
+                    this.video.srcObject = this.stream;
+                    return new Promise((resolve) => {
+                        this.video.onloadeddata = () => resolve(true);
+                    });
+                } catch (error) {
+                    console.error("Error al acceder a la cámara:", error);
+                    alert("No se pudo acceder a la cámara. Por favor, revisa los permisos.");
+                    return false;
+                }
+            }
+
+            stop() {
+                if (this.stream) {
+                    this.stream.getTracks().forEach(track => track.stop());
+                    this.stream = null;
+                }
+                this.video.srcObject = null;
+            }
+        }
+
+        // ==========================================
+        // 2. Módulo: Audio Manager
+        // ==========================================
+        class AudioManager {
+            constructor() {
+                this.audioCtx = null;
+                this.oscillator = null;
+                this.isPlaying = false;
+            }
+
+            init() {
+                // Debe iniciarse después de una interacción del usuario
+                const AudioContext = window.AudioContext || window.webkitAudioContext;
+                this.audioCtx = new AudioContext();
+            }
+
+            playBeep() {
+                if (this.isPlaying || !this.audioCtx) return;
+                this.isPlaying = true;
+
+                if (this.audioCtx.state === 'suspended') {
+                    this.audioCtx.resume();
+                }
+
+                // Crear oscilador para el pitido
+                this.oscillator = this.audioCtx.createOscillator();
+                this.oscillator.type = 'sine'; // Sonido suave
+                this.oscillator.frequency.setValueAtTime(800, this.audioCtx.currentTime); // 800 Hz
+
+                // Controlar el volumen para que no sea molesto
+                const gainNode = this.audioCtx.createGain();
+                gainNode.gain.setValueAtTime(0.05, this.audioCtx.currentTime); // Volumen al 5%
+
+                // Conectar y reproducir
+                this.oscillator.connect(gainNode);
+                gainNode.connect(this.audioCtx.destination);
+                
+                // Aplicar una modulación para que suene como una alarma pulsante
+                gainNode.gain.exponentialRampToValueAtTime(0.00001, this.audioCtx.currentTime + 1.5);
+                
+                this.oscillator.start();
+                
+                // Reiniciar el oscilador para permitir pulsos continuos si es necesario
+                setTimeout(() => {
+                    this.stopBeep();
+                    if(window.appController && window.appController.isDistracted) {
+                        this.playBeep();
+                    }
+                }, 500);
+            }
+
+            playClickSound(buttonId) {
+                if (!this.audioCtx || this.audioCtx.state === 'suspended') return;
+                
+                const osc = this.audioCtx.createOscillator();
+                const gain = this.audioCtx.createGain();
+                
+                // Diferentes frecuencias (tonos) según el botón
+                const frequencies = [600, 900, 1200];
+                const startFreq = frequencies[buttonId] !== undefined ? frequencies[buttonId] : 800;
+                
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(startFreq, this.audioCtx.currentTime);
+                osc.frequency.exponentialRampToValueAtTime(startFreq / 2, this.audioCtx.currentTime + 0.1);
+                
+                gain.gain.setValueAtTime(0.1, this.audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.001, this.audioCtx.currentTime + 0.1);
+                
+                osc.connect(gain);
+                gain.connect(this.audioCtx.destination);
+                
+                osc.start();
+                osc.stop(this.audioCtx.currentTime + 0.1);
+            }
+
+            stopBeep() {
+                if (!this.isPlaying) return;
+                if (this.oscillator) {
+                    try {
+                        this.oscillator.stop();
+                        this.oscillator.disconnect();
+                    } catch(e) {}
+                    this.oscillator = null;
+                }
+                this.isPlaying = false;
+            }
+        }
+
+        // ==========================================
+        // 3. Módulo: UI Manager
+        // ==========================================
+        class UIManager {
+            constructor() {
+                this.statusBadge = document.getElementById('status-badge');
+                this.alertPanel = document.getElementById('alert-panel');
+                this.startBtn = document.getElementById('start-btn');
+                this.stopBtn = document.getElementById('stop-btn');
+            }
+
+            setStatus(text, color = 'var(--primary)', bgColor = 'rgba(0, 255, 204, 0.1)') {
+                this.statusBadge.innerText = text;
+                this.statusBadge.style.color = color;
+                this.statusBadge.style.borderColor = color;
+                this.statusBadge.style.background = bgColor;
+            }
+
+            showAlert() {
+                if (!this.alertPanel.classList.contains('active')) {
+                    this.alertPanel.classList.add('active');
+                    this.setStatus("¡Usuario Distraído!", "var(--alert)", "rgba(255, 51, 102, 0.2)");
+                }
+            }
+
+            hideAlert() {
+                if (this.alertPanel.classList.contains('active')) {
+                    this.alertPanel.classList.remove('active');
+                    this.setStatus("Observando...", "var(--primary)", "rgba(0, 255, 204, 0.1)");
+                }
+            }
+
+            hideStartButton() {
+                this.startBtn.classList.add('hidden');
+                this.stopBtn.classList.remove('hidden');
+            }
+
+            showStartButton() {
+                this.startBtn.classList.remove('hidden');
+                this.stopBtn.classList.add('hidden');
+                this.setStatus("Esperando Inicio...", "var(--primary)", "rgba(0, 255, 204, 0.1)");
+            }
+        }
+
+        // ==========================================
+        // 4. Módulo: Attention Detector
+        // ==========================================
+        class AttentionDetector {
+            constructor() {
+                this.distractedTimeThreshold = 300; // 0.3 segundos de tolerancia (mucho más rápido)
+                this.distractedStartTime = null;
+            }
+
+            /**
+             * Analiza los landmarks faciales para determinar si el usuario mira al frente
+             * @returns {boolean} true si está atento, false si está distraído
+             */
+            checkAttention(landmarks, timestamp) {
+                if (!landmarks || landmarks.length === 0) {
+                    // Si no hay rostro, cuenta como distracción
+                    return this.updateTimers(true, timestamp);
+                }
+
+                const face = landmarks[0];
+                
+                // Puntos clave de MediaPipe Face Mesh
+                const noseTip = face[1];
+                const leftCheek = face[234];
+                const rightCheek = face[454];
+                const topHead = face[10];
+                const chin = face[152];
+
+                // --- 1. Calcular Orientación Horizontal (YAW) ---
+                // Medimos la distancia de la nariz a los extremos izquierdo y derecho de la cara
+                const distLeft = Math.abs(leftCheek.x - noseTip.x);
+                const distRight = Math.abs(rightCheek.x - noseTip.x);
+                
+                // Relación entre ambas distancias
+                const yawRatio = distLeft / distRight;
+
+                // --- 2. Calcular Orientación Vertical (PITCH) ---
+                const distTop = Math.abs(topHead.y - noseTip.y);
+                const distBottom = Math.abs(chin.y - noseTip.y);
+                const pitchRatio = distTop / distBottom;
+
+                // --- 3. Determinar Distracción ---
+                // Valores normales: yawRatio ~ 1.0, pitchRatio ~ 0.8
+                // Umbrales de desviación
+                const isLookingAway = 
+                    (yawRatio > 1.9 || yawRatio < 0.52) || // Mirando muy a los lados (sensibilidad aumentada)
+                    (pitchRatio > 1.6 || pitchRatio < 0.5); // Mirando muy arriba/abajo (sensibilidad aumentada)
+
+                return this.updateTimers(isLookingAway, timestamp);
+            }
+
+            updateTimers(isLookingAway, timestamp) {
+                if (isLookingAway) {
+                    // Inicia el temporizador si no estaba ya corriendo
+                    if (!this.distractedStartTime) {
+                        this.distractedStartTime = timestamp;
+                    } 
+                    // Si ya pasó el tiempo umbral, declara distracción
+                    else if (timestamp - this.distractedStartTime > this.distractedTimeThreshold) {
+                        return false; // Distraído
+                    }
+                } else {
+                    // El usuario está mirando, se reinicia el temporizador
+                    this.distractedStartTime = null;
+                }
+                
+                return true; // Atento
+            }
+        }
+
+        // ==========================================
+        // 5. Módulo: Vision Manager
+        // ==========================================
+        class VisionManager {
+            constructor(videoElement, canvasElement) {
+                this.video = videoElement;
+                this.canvas = canvasElement;
+                this.ctx = canvasElement.getContext("2d");
+                this.faceLandmarker = null;
+                this.handLandmarker = null;
+                this.drawingUtils = new DrawingUtils(this.ctx);
+            }
+
+            async initialize() {
+                try {
+                    const filesetResolver = await FilesetResolver.forVisionTasks(
+                        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
+                    );
+                    this.faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
+                        baseOptions: {
+                            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+                            delegate: "GPU"
+                        },
+                        outputFaceBlendshapes: false,
+                        runningMode: "VIDEO",
+                        numFaces: 1
+                    });
+
+                    this.handLandmarker = await HandLandmarker.createFromOptions(filesetResolver, {
+                        baseOptions: {
+                            modelAssetPath: `https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task`,
+                            delegate: "GPU"
+                        },
+                        runningMode: "VIDEO",
+                        numHands: 2
+                    });
+
+                    return true;
+                } catch (error) {
+                    console.error("Error al inicializar MediaPipe:", error);
+                    return false;
+                }
+            }
+
+            detect(timestamp) {
+                if (!this.faceLandmarker || !this.handLandmarker) return null;
+                
+                // Ajustar tamaño del canvas
+                if (this.canvas.width !== this.video.videoWidth) {
+                    this.canvas.width = this.video.videoWidth;
+                    this.canvas.height = this.video.videoHeight;
+                }
+
+                // Realizar detección
+                const faceResults = this.faceLandmarker.detectForVideo(this.video, timestamp);
+                const handResults = this.handLandmarker.detectForVideo(this.video, timestamp);
+                
+                // Limpiar el canvas 2D (ya no dibujamos aquí, delegamos a Three.js)
+                this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+                
+                return { faceResults, handResults };
+            }
+        }
+
+        // ==========================================
+        // 5.5. Módulo: Three Manager
+        // ==========================================
+        class ThreeManager {
+            constructor(canvasId) {
+                this.canvas = document.getElementById(canvasId);
+                this.scene = new THREE.Scene();
+                this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+                this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, alpha: true, antialias: true });
+                
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                
+                // Nota: Ya no invertimos la escena internamente con applyMatrix4 
+                // porque el CSS (transform: scaleX(-1)) invierte el canvas completo.
+                // Al dejarlos en X = -3.5, se dibujarán a la izquierda y el CSS los moverá a la derecha visual.
+                
+                this.camera.position.z = 5;
+                this.buttons = [];
+
+                this.initLights();
+                this.initButtons();
+                this.initSpaceBackground();
+                this.initConstellations();
+                this.initFireEffect();
+
+                window.addEventListener('resize', () => this.onWindowResize(), false);
+            }
+
+            initLights() {
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+                this.scene.add(ambientLight);
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+                directionalLight.position.set(0, 5, 5);
+                this.scene.add(directionalLight);
+            }
+
+            initButtons() {
+                const geometry = new THREE.CylinderGeometry(0.6, 0.6, 0.2, 32);
+                
+                // Colores: Rojo, Azul, Verde
+                const colors = [
+                    { default: 0xff3333, pressed: 0xffaaaa }, // Rojo
+                    { default: 0x3333ff, pressed: 0xaaaaff }, // Azul
+                    { default: 0x33ff33, pressed: 0xaaffaa }  // Verde
+                ];
+
+                // Posicionar botones a la derecha del frustum (-X debido al espejo)
+                const startY = 1.5;
+                const gap = 1.5;
+
+                for (let i = 0; i < 3; i++) {
+                    const materialProps = { color: colors[i].default, transparent: true, opacity: 0.8, wireframe: false };
+                    const material = new THREE.MeshPhongMaterial(materialProps);
+                    const button = new THREE.Mesh(geometry, material);
+                    button.rotation.x = Math.PI / 2; // Cara frontal
+                    
+                    // Colocar en la izquierda del canvas 3D (X = -3.5)
+                    // El CSS volteará el canvas, poniéndolos en la DERECHA de la pantalla.
+                    button.position.set(-3.5, startY - (i * gap), 0);
+                    
+                    button.userData = { 
+                        id: i, 
+                        isPressed: false, 
+                        defaultColor: colors[i].default, 
+                        pressedColor: colors[i].pressed,
+                        lastPressTime: 0
+                    };
+                    
+                    this.scene.add(button);
+                    this.buttons.push(button);
+                }
+            }
+
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+            }
+
+            initSpaceBackground() {
+                const starGeom = new THREE.BufferGeometry();
+                const starMaterial = new THREE.PointsMaterial({
+                    color: 0xffffff,
+                    size: 0.05,
+                    transparent: true,
+                    opacity: 0.8
+                });
+
+                const starPositions = [];
+                // Esparcir estrellas en un área amplia
+                for (let i = 0; i < 800; i++) {
+                    starPositions.push(
+                        (Math.random() - 0.5) * 30, // X
+                        (Math.random() - 0.5) * 30, // Y
+                        -5 - Math.random() * 20     // Z (atrás)
+                    );
+                }
+                starGeom.setAttribute('position', new THREE.Float32BufferAttribute(starPositions, 3));
+                this.spaceStars = new THREE.Points(starGeom, starMaterial);
+                this.spaceStars.visible = false; // Se mostrará cuando esté atento
+                this.scene.add(this.spaceStars);
+            }
+
+            initFireEffect() {
+                const fireGeom = new THREE.BufferGeometry();
+                const particleCount = 1500;
+                this.firePositions = new Float32Array(particleCount * 3);
+                this.fireVelocities = [];
+                this.fireLifetimes = new Float32Array(particleCount);
+
+                for (let i = 0; i < particleCount; i++) {
+                    this.firePositions[i*3] = (Math.random() - 0.5) * 15; // X spread
+                    this.firePositions[i*3+1] = -5 - Math.random() * 2;   // Y start
+                    this.firePositions[i*3+2] = Math.random() * 2 - 1;    // Z
+
+                    this.fireVelocities.push({
+                        x: (Math.random() - 0.5) * 0.05,
+                        y: 0.1 + Math.random() * 0.1,
+                        z: (Math.random() - 0.5) * 0.05
+                    });
+                    this.fireLifetimes[i] = Math.random();
+                }
+
+                fireGeom.setAttribute('position', new THREE.BufferAttribute(this.firePositions, 3));
+                
+                const fireMat = new THREE.PointsMaterial({
+                    color: 0x0088ff, // Fuego azul
+                    size: 0.2,
+                    transparent: true,
+                    opacity: 0.8,
+                    blending: THREE.AdditiveBlending,
+                    depthWrite: false
+                });
+
+                this.fireSystem = new THREE.Points(fireGeom, fireMat);
+                this.fireSystem.visible = false;
+                this.scene.add(this.fireSystem);
+            }
+
+            animateFire() {
+                if (!this.fireSystem || !this.fireSystem.visible) return;
+                const positions = this.fireSystem.geometry.attributes.position.array;
+                for (let i = 0; i < this.fireVelocities.length; i++) {
+                    this.fireLifetimes[i] -= 0.015;
+                    if (this.fireLifetimes[i] <= 0) {
+                        this.fireLifetimes[i] = 1.0;
+                        positions[i*3] = (Math.random() - 0.5) * 15;
+                        positions[i*3+1] = -5 - Math.random() * 2;
+                        positions[i*3+2] = Math.random() * 2 - 1;
+                    } else {
+                        positions[i*3] += this.fireVelocities[i].x;
+                        positions[i*3+1] += this.fireVelocities[i].y;
+                        positions[i*3+2] += this.fireVelocities[i].z;
+                        this.fireVelocities[i].x += (Math.random() - 0.5) * 0.01;
+                    }
+                }
+                this.fireSystem.geometry.attributes.position.needsUpdate = true;
+            }
+
+            initConstellations() {
+                this.constellationGroup = new THREE.Group();
+                this.constellationGroup.visible = false;
+                
+                // --- Rostro ---
+                this.faceGeometry = new THREE.BufferGeometry();
+                // 468 landmarks * algunas conexiones extra, buffer grande
+                this.facePositions = new Float32Array(5000 * 3); 
+                this.faceGeometry.setAttribute('position', new THREE.BufferAttribute(this.facePositions, 3));
+                this.faceMaterial = new THREE.LineBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending });
+                this.faceLines = new THREE.LineSegments(this.faceGeometry, this.faceMaterial);
+                
+                this.facePointsGeometry = new THREE.BufferGeometry();
+                this.facePointsPositions = new Float32Array(478 * 3);
+                this.facePointsGeometry.setAttribute('position', new THREE.BufferAttribute(this.facePointsPositions, 3));
+                this.facePointsMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 0.08, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
+                this.facePoints = new THREE.Points(this.facePointsGeometry, this.facePointsMaterial);
+                
+                this.constellationGroup.add(this.faceLines);
+                this.constellationGroup.add(this.facePoints);
+
+                // --- Manos ---
+                this.handsLines = [];
+                this.handsPoints = [];
+                for(let i = 0; i < 2; i++) {
+                    const hGeom = new THREE.BufferGeometry();
+                    const hPos = new Float32Array(100 * 3); // Buffer para lineas de la mano
+                    hGeom.setAttribute('position', new THREE.BufferAttribute(hPos, 3));
+                    const hMat = new THREE.LineBasicMaterial({ color: 0x88ccff, transparent: true, opacity: 0.3, blending: THREE.AdditiveBlending });
+                    const hLine = new THREE.LineSegments(hGeom, hMat);
+                    
+                    const pGeom = new THREE.BufferGeometry();
+                    const pPos = new Float32Array(21 * 3);
+                    pGeom.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+                    const pMat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.1, transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
+                    const pPoint = new THREE.Points(pGeom, pMat);
+                    
+                    this.handsLines.push(hLine);
+                    this.handsPoints.push(pPoint);
+                    this.constellationGroup.add(hLine);
+                    this.constellationGroup.add(pPoint);
+                }
+                
+                this.scene.add(this.constellationGroup);
+            }
+
+            calculateVisibleSize() {
+                const vFov = (this.camera.fov * Math.PI) / 180;
+                const visibleHeight = 2 * Math.tan(vFov / 2) * this.camera.position.z;
+                const visibleWidth = visibleHeight * this.camera.aspect;
+                return { w: visibleWidth, h: visibleHeight };
+            }
+
+            updateConstellations(faceResults, handResults, isAttentive, videoWidth, videoHeight) {
+                if (!isAttentive) {
+                    this.constellationGroup.visible = false;
+                    if (this.spaceStars) this.spaceStars.visible = false;
+                    if (this.fireSystem) this.fireSystem.visible = false;
+                    return;
+                }
+                
+                this.constellationGroup.visible = true;
+                if (this.spaceStars) this.spaceStars.visible = true;
+
+                const size = this.calculateVisibleSize();
+                const w = size.w;
+                const h = size.h;
+
+                let scaleX = 1;
+                let scaleY = 1;
+
+                if (videoWidth && videoHeight) {
+                    const videoAspect = videoWidth / videoHeight;
+                    const screenAspect = window.innerWidth / window.innerHeight;
+                    if (screenAspect > videoAspect) {
+                        scaleY = screenAspect / videoAspect; 
+                    } else {
+                        scaleX = videoAspect / screenAspect;
+                    }
+                }
+
+                const mapPos = (landmark) => {
+                    return {
+                        x: (landmark.x - 0.5) * w * scaleX,
+                        y: -(landmark.y - 0.5) * h * scaleY,
+                        z: -landmark.z * w * 0.2
+                    };
+                };
+
+                // Actualizar Rostro
+                if (faceResults && faceResults.faceLandmarks && faceResults.faceLandmarks.length > 0) {
+                    this.faceLines.visible = true;
+                    this.facePoints.visible = true;
+                    
+                    const landmarks = faceResults.faceLandmarks[0];
+                    
+                    // Filtrar conexiones para simular una constelación (menos densa que la malla)
+                    let faceConnections = [];
+                    if (FaceLandmarker) {
+                        faceConnections = [
+                            ...FaceLandmarker.FACE_LANDMARKS_FACE_OVAL,
+                            ...FaceLandmarker.FACE_LANDMARKS_RIGHT_EYE,
+                            ...FaceLandmarker.FACE_LANDMARKS_LEFT_EYE,
+                            ...FaceLandmarker.FACE_LANDMARKS_RIGHT_EYEBROW,
+                            ...FaceLandmarker.FACE_LANDMARKS_LEFT_EYEBROW,
+                            ...FaceLandmarker.FACE_LANDMARKS_LIPS
+                        ];
+                    }
+
+                    // Encontrar índices únicos para dibujar estrellas solo en los nodos conectados
+                    const uniqueIndices = new Set();
+                    faceConnections.forEach(conn => {
+                        uniqueIndices.add(conn.start);
+                        uniqueIndices.add(conn.end);
+                    });
+
+                    // Puntos (Estrellas de la constelación)
+                    let pIdx = 0;
+                    uniqueIndices.forEach(index => {
+                        if (landmarks[index]) {
+                            const pos = mapPos(landmarks[index]);
+                            this.facePointsPositions[pIdx++] = pos.x;
+                            this.facePointsPositions[pIdx++] = pos.y;
+                            this.facePointsPositions[pIdx++] = pos.z;
+                        }
+                    });
+                    this.facePointsGeometry.setDrawRange(0, uniqueIndices.size);
+                    this.facePointsGeometry.attributes.position.needsUpdate = true;
+
+                    // Líneas
+                    let lIdx = 0;
+                    for (let i = 0; i < faceConnections.length; i++) {
+                        const start = landmarks[faceConnections[i].start];
+                        const end = landmarks[faceConnections[i].end];
+                        if (start && end) {
+                            const pos1 = mapPos(start);
+                            const pos2 = mapPos(end);
+                            this.facePositions[lIdx++] = pos1.x;
+                            this.facePositions[lIdx++] = pos1.y;
+                            this.facePositions[lIdx++] = pos1.z;
+                            this.facePositions[lIdx++] = pos2.x;
+                            this.facePositions[lIdx++] = pos2.y;
+                            this.facePositions[lIdx++] = pos2.z;
+                        }
+                    }
+                    this.faceGeometry.setDrawRange(0, faceConnections.length * 2);
+                    this.faceGeometry.attributes.position.needsUpdate = true;
+                } else {
+                    this.faceLines.visible = false;
+                    this.facePoints.visible = false;
+                }
+
+                // Actualizar Manos
+                for (let i = 0; i < 2; i++) {
+                    if (handResults && handResults.landmarks && handResults.landmarks.length > i) {
+                        this.handsLines[i].visible = true;
+                        this.handsPoints[i].visible = true;
+                        
+                        const landmarks = handResults.landmarks[i];
+                        
+                        // Puntos
+                        let pIdx = 0;
+                        const pArr = this.handsPoints[i].geometry.attributes.position.array;
+                        for (let j = 0; j < landmarks.length; j++) {
+                            const pos = mapPos(landmarks[j]);
+                            pArr[pIdx++] = pos.x;
+                            pArr[pIdx++] = pos.y;
+                            pArr[pIdx++] = pos.z;
+                        }
+                        this.handsPoints[i].geometry.setDrawRange(0, landmarks.length);
+                        this.handsPoints[i].geometry.attributes.position.needsUpdate = true;
+                        
+                        // Líneas
+                        if (HandLandmarker && HandLandmarker.HAND_CONNECTIONS) {
+                            const connections = HandLandmarker.HAND_CONNECTIONS;
+                            let lIdx = 0;
+                            const lArr = this.handsLines[i].geometry.attributes.position.array;
+                            for (let j = 0; j < connections.length; j++) {
+                                const start = landmarks[connections[j].start];
+                                const end = landmarks[connections[j].end];
+                                if (start && end) {
+                                    const pos1 = mapPos(start);
+                                    const pos2 = mapPos(end);
+                                    lArr[lIdx++] = pos1.x;
+                                    lArr[lIdx++] = pos1.y;
+                                    lArr[lIdx++] = pos1.z;
+                                    lArr[lIdx++] = pos2.x;
+                                    lArr[lIdx++] = pos2.y;
+                                    lArr[lIdx++] = pos2.z;
+                                }
+                            }
+                            this.handsLines[i].geometry.setDrawRange(0, connections.length * 2);
+                            this.handsLines[i].geometry.attributes.position.needsUpdate = true;
+                        }
+                    } else {
+                        this.handsLines[i].visible = false;
+                        this.handsPoints[i].visible = false;
+                    }
+                }
+            }
+
+            render() {
+                if (this.spaceStars && this.spaceStars.visible) {
+                    this.spaceStars.rotation.z -= 0.0003;
+                    this.spaceStars.rotation.x += 0.0001;
+                }
+                this.animateFire();
+                this.renderer.render(this.scene, this.camera);
+            }
+        }
+
+        // ==========================================
+        // 5.6. Módulo: Interaction Manager
+        // ==========================================
+        class InteractionManager {
+            constructor(threeManager, audioManager) {
+                this.threeManager = threeManager;
+                this.audioManager = audioManager;
+                this.raycaster = new THREE.Raycaster();
+                this.pointer = new THREE.Vector2();
+            }
+
+            checkInteractions(handResults, timestamp) {
+                // Reset botones visualmente
+                this.threeManager.buttons.forEach(btn => {
+                    if (btn.userData.isPressed && (timestamp - btn.userData.lastPressTime > 200)) {
+                        btn.material.color.setHex(btn.userData.defaultColor);
+                        btn.userData.isPressed = false;
+                        btn.scale.set(1, 1, 1);
+                    }
+                });
+
+                if (!handResults || !handResults.landmarks || handResults.landmarks.length === 0) return;
+
+                for (const landmarks of handResults.landmarks) {
+                    // Punta del dedo índice (Landmark 8)
+                    const indexTip = landmarks[8];
+                    
+                    // Convertir de MediaPipe (0-1) a NDC (-1 a 1)
+                    // MediaPipe X es 0 (izq) a 1 (der). La cámara es espejo.
+                    this.pointer.x = (indexTip.x * 2) - 1;
+                    this.pointer.y = -(indexTip.y * 2) + 1;
+
+                    this.raycaster.setFromCamera(this.pointer, this.threeManager.camera);
+
+                    const intersects = this.raycaster.intersectObjects(this.threeManager.buttons);
+
+                    if (intersects.length > 0) {
+                        const button = intersects[0].object;
+                        if (!button.userData.isPressed) {
+                            button.userData.isPressed = true;
+                            button.userData.lastPressTime = timestamp;
+                            button.material.color.setHex(button.userData.pressedColor);
+                            button.scale.set(1.1, 1.1, 1.1);
+                            this.audioManager.playClickSound(button.userData.id);
+
+                            // Efectos de botones
+                            if (button.userData.id === 1) { // Botón Azul
+                                if (this.threeManager.fireSystem) this.threeManager.fireSystem.visible = true;
+                            } else if (button.userData.id === 2) { // Botón Verde
+                                if (this.threeManager.fireSystem) this.threeManager.fireSystem.visible = false;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // ==========================================
+        // 6. Controlador Principal (App Controller)
+        // ==========================================
+        class AppController {
+            constructor() {
+                this.video = document.getElementById("webcam");
+                this.canvas = document.getElementById("output_canvas");
+                
+                this.camera = new CameraManager(this.video);
+                this.audio = new AudioManager();
+                this.ui = new UIManager();
+                this.vision = new VisionManager(this.video, this.canvas);
+                this.attentionDetector = new AttentionDetector();
+                this.threeManager = new ThreeManager('three_canvas');
+                this.interactionManager = new InteractionManager(this.threeManager, this.audio);
+                
+                this.lastVideoTime = -1;
+                this.lastDetectionTime = 0;
+                this.detectionInterval = 1000 / 15; // 15 FPS para optimizar IA en bajos recursos
+                this.isRunning = false;
+                this.isDistracted = false;
+
+                // Eventos
+                document.getElementById('start-btn').addEventListener('click', () => this.startApp());
+                document.getElementById('stop-btn').addEventListener('click', () => this.stopApp());
+                
+                // Exponer a global para callbacks de setTimeout en Audio
+                window.appController = this;
+            }
+
+            async startApp() {
+                this.ui.setStatus("Cargando Modelo AI...", "var(--primary)");
+                this.ui.hideStartButton();
+                this.audio.init();
+
+                // 1. Iniciar Cámara
+                const cameraStarted = await this.camera.start();
+                if (!cameraStarted) return;
+
+                // 2. Iniciar Visión (MediaPipe)
+                const visionStarted = await this.vision.initialize();
+                if (!visionStarted) {
+                    this.ui.setStatus("Error al cargar AI", "var(--alert)");
+                    return;
+                }
+
+                this.ui.setStatus("Observando...", "var(--primary)");
+                this.isRunning = true;
+                
+                // 3. Comenzar Bucle
+                window.requestAnimationFrame((t) => this.renderLoop(t));
+            }
+
+            stopApp() {
+                this.isRunning = false;
+                this.camera.stop();
+                this.audio.stopBeep();
+                this.ui.hideAlert();
+                this.ui.showStartButton();
+                this.isDistracted = false;
+                
+                // Limpiar el canvas
+                const canvas = this.vision.canvas;
+                const ctx = this.vision.ctx;
+                if (ctx && canvas) {
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                }
+            }
+
+            renderLoop(timestamp) {
+                if (!this.isRunning) return;
+
+                // Optimización de recursos: Ejecutar IA a ~15 FPS
+                if (timestamp - this.lastDetectionTime > this.detectionInterval) {
+                    if (this.video.currentTime !== this.lastVideoTime) {
+                        this.lastVideoTime = this.video.currentTime;
+                        this.lastDetectionTime = timestamp;
+                        
+                        // Procesar fotograma
+                        const results = this.vision.detect(performance.now());
+                        
+                        if (results) {
+                            // 1. Analizar Atención (Rostro)
+                            const faceLandmarks = results.faceResults ? results.faceResults.faceLandmarks : null;
+                            const isAttentive = this.attentionDetector.checkAttention(faceLandmarks, performance.now());
+                            
+                            if (!isAttentive) {
+                                // Usuario Distraído
+                                if (!this.isDistracted) {
+                                    this.isDistracted = true;
+                                    this.ui.showAlert();
+                                    this.audio.playBeep();
+                                }
+                            } else {
+                                // Usuario Atento
+                                if (this.isDistracted) {
+                                    this.isDistracted = false;
+                                    this.ui.hideAlert();
+                                    this.audio.stopBeep();
+                                }
+                            }
+
+                            // 2. Analizar Interacciones 3D (Manos)
+                            this.interactionManager.checkInteractions(results.handResults, performance.now());
+                            
+                            // 3. Actualizar Constelaciones (Solo si no está distraído)
+                            this.threeManager.updateConstellations(results.faceResults, results.handResults, !this.isDistracted, this.video.videoWidth, this.video.videoHeight);
+                        }
+                    }
+                }
+
+                // Three.js renderiza a 60 FPS fluidos independientemente de la IA
+                this.threeManager.render();
+                window.requestAnimationFrame((t) => this.renderLoop(t));
+            }
+        }
+
+        // Inicializar la aplicación cuando cargue el DOM
+        window.onload = () => {
+            new AppController();
+        };
+
+    </script>
+</body>
+</html>

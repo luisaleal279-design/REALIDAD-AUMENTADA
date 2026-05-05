@@ -1,450 +1,604 @@
 <!DOCTYPE html>
 <html lang="es">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Enfoque+</title>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <title>Smart Mirror AR</title>
+    <style>
+        body, html { 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden; 
+            background-color: #000; 
+            width: 100vw; 
+            height: 100vh; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        }
+        
+        #webcam { display: none; }
+        
+        .canvas-container { 
+            position: relative; 
+            width: 100vw; 
+            height: 100vh; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+        }
+        
+        /* Three.js canvas para el entorno virtual */
+        #threejs-canvas { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            z-index: 1; 
+            transition: opacity 0.8s ease-in-out; 
+            opacity: 0; /* Oculto inicialmente */
+        }
+        
+        /* Canvas para el usuario segmentado */
+        #user-canvas { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            z-index: 2; 
+            object-fit: contain; 
+        }
+        
+        #ui-layer { 
+            position: absolute; 
+            top: 20px; 
+            left: 20px; 
+            z-index: 10; 
+            color: white; 
+            background: rgba(10, 15, 30, 0.6); 
+            padding: 20px; 
+            border-radius: 15px; 
+            backdrop-filter: blur(10px); 
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+            max-width: 300px;
+        }
+        
+        h2 { margin: 0 0 15px 0; font-size: 22px; font-weight: 600; letter-spacing: 0.5px; }
+        
+        .hidden { display: none !important; }
+        
+        #start-btn { 
+            padding: 12px 20px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            background: linear-gradient(135deg, #00ff88 0%, #00b3ff 100%); 
+            color: #000; 
+            border: none; 
+            border-radius: 8px; 
+            font-weight: 700; 
+            width: 100%;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); 
+            box-shadow: 0 4px 15px rgba(0, 255, 136, 0.3);
+        }
+        
+        #start-btn:hover { 
+            transform: translateY(-2px); 
+            box-shadow: 0 6px 20px rgba(0, 255, 136, 0.5); 
+        }
+        
+        #start-btn:disabled { 
+            background: #444; 
+            color: #888;
+            cursor: not-allowed; 
+            transform: none; 
+            box-shadow: none;
+        }
+        
+        .status { 
+            margin-top: 15px; 
+            font-size: 14px; 
+            color: #ddd;
+        }
+        
+        .attentive-indicator { 
+            margin-top: 15px; 
+            padding: 8px 10px; 
+            border-radius: 6px; 
+            background: rgba(255, 50, 50, 0.8); 
+            color: white; 
+            font-weight: bold; 
+            text-align: center; 
+            transition: background-color 0.4s ease;
+        }
+        
+        .attentive-indicator.active { 
+            background: rgba(0, 255, 136, 0.8); 
+            color: black; 
+        }
+        
+        .instructions {
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 15px;
+            line-height: 1.4;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .controls-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .small-btn {
+            padding: 6px 10px;
+            font-size: 12px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px;
+            cursor: pointer;
+            flex: 1;
+        }
+        .small-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+    </style>
 </head>
-
 <body>
-    <div class="bubbles">
-        <div class="bubble"></div>
-        <div class="bubble"></div>
-        <div class="bubble"></div>
-        <div class="bubble"></div>
-        <div class="bubble"></div>
-        <div class="bubble"></div>
-        <div class="bubble"></div>
-        <div class="bubble"></div>
-        <div class="bubble"></div>
-        <div class="bubble"></div>
-    </div>
-    <div class="side-controls-right">
-        <label for="volume-slider" title="Volumen de Alarma">🔊</label>
-        <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="0.5">
+
+    <div class="canvas-container">
+        <!-- Elemento de video original oculto -->
+        <video id="webcam" autoplay playsinline></video>
+        <!-- Canvas para renderizar la escena Three.js -->
+        <canvas id="threejs-canvas"></canvas>
+        <!-- Canvas para dibujar al usuario recortado -->
+        <canvas id="user-canvas"></canvas>
     </div>
 
-    <div class="glow-overlay" id="glow-overlay"></div>
-    <div class="app-container">
-        <header>
-            <h1>Enfoque<span>+</span></h1>
-            <p>Enfócate sin distracciones</p>
-        </header>
-
-        <main>
-            <div class="camera-wrapper glass-panel">
-                <video id="webcam" autoplay playsinline></video>
-                <canvas id="output_canvas"></canvas>
-
-
-                <div id="status-overlay" class="status-overlay">
-                    <div class="status-icon" id="status-icon">
-                        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none"
-                            viewBox="0 0 24 24">
-                            <path stroke="currentColor" stroke-width="2"
-                                d="M21 12c0 1.2-4.03 6-9 6s-9-4.8-9-6c0-1.2 4.03-6 9-6s9 4.8 9 6Z" />
-                            <path stroke="currentColor" stroke-width="2" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
-                        </svg>
-                    </div>
-                    <h2 id="status-text">Listo para iniciar</h2>
-                </div>
-            </div>
-
-            <div class="dashboard-overlay hidden" id="dashboard-overlay">
-                <div class="dashboard-header">
-                    <div class="state-indicator state-focused" id="state-indicator">Enfocado</div>
-                    <div class="timer" id="session-timer">00:00</div>
-                </div>
-                <div class="concentration-wrapper">
-                    <span>Concentración</span>
-                    <div class="concentration-bar-container">
-                        <div class="concentration-bar" id="concentration-bar" style="width: 100%;"></div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="controls">
-                <button id="enableWebcamButton" class="btn-primary">
-                    <svg class="btn-icon" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24"
-                        fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round"
-                            d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                    </svg>
-                    <span class="btn-text" id="btn-text">Habilitar Cámara</span>
-                </button>
-            </div>
-
-            <p class="privacy-notice">🔒 Tu imagen se procesa localmente y no se almacena.</p>
-
-            <div id="warning-message" class="warning-message hidden">
-                Hey, vuelve al foco
-            </div>
-        </main>
+    <!-- Interfaz de Usuario -->
+    <div id="ui-layer">
+        <h2>Smart Mirror AR</h2>
+        <button id="start-btn" disabled>Cargando IA...</button>
+        <div class="status" id="status-text">Inicializando MediaPipe y Three.js...</div>
+        <div class="attentive-indicator" id="attentive-indicator">Esperando cámara...</div>
+        <div class="instructions">
+            <b>Instrucción:</b> Por favor, guarda la imagen anime deseada como <code>background.jpg</code> en la misma carpeta que este archivo HTML para verla de fondo.
+        </div>
+        <div class="controls-row">
+            <button id="toggle-mask-btn" class="small-btn">Invertir Máscara</button>
+            <button id="toggle-mirror-btn" class="small-btn">Invertir Espejo</button>
+        </div>
     </div>
 
-    <script type="module">
-        import {
-            FaceLandmarker,
-            FilesetResolver,
-            DrawingUtils
-        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
-
-
-
-        // --- AUDIO SERVICE (Singleton) ---
-        class AudioService {
-            constructor() {
-                this.audioCtx = null;
-                this.oscillator = null;
-                this.isPlaying = false;
-                this.volume = 0.5;
+    <!-- Importación de módulos Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
             }
-
-            setVolume(value) {
-                this.volume = parseFloat(value);
-            }
-
-            init() {
-                if (!this.audioCtx) {
-                    const AudioContext = window.AudioContext || window.webkitAudioContext;
-                    this.audioCtx = new AudioContext();
-                }
-            }
-
-            playBeep() {
-                if (this.isPlaying) return;
-                this.init();
-                if (this.audioCtx.state === 'suspended') {
-                    this.audioCtx.resume();
-                }
-
-                this.oscillator = this.audioCtx.createOscillator();
-                this.oscillator.type = 'sine';
-                this.oscillator.frequency.setValueAtTime(880, this.audioCtx.currentTime); // A5 note
-
-                const gainNode = this.audioCtx.createGain();
-                if (this.volume === 0) {
-                    gainNode.gain.setValueAtTime(0, this.audioCtx.currentTime);
-                } else {
-                    gainNode.gain.setValueAtTime(0.01, this.audioCtx.currentTime);
-                    gainNode.gain.exponentialRampToValueAtTime(this.volume, this.audioCtx.currentTime + 0.1);
-                }
-
-                this.oscillator.connect(gainNode);
-                gainNode.connect(this.audioCtx.destination);
-                this.oscillator.start();
-                this.isPlaying = true;
-            }
-
-            stopBeep() {
-                if (!this.isPlaying || !this.oscillator) return;
-                this.oscillator.stop();
-                this.oscillator.disconnect();
-                this.oscillator = null;
-                this.isPlaying = false;
-            }
-        }
-
-        const audioService = new AudioService();
-
-        const volumeSlider = document.getElementById("volume-slider");
-        volumeSlider.addEventListener("input", (e) => {
-            audioService.setVolume(e.target.value);
-        });
-
-        // --- VISION SERVICE ---
-        let faceLandmarker;
-        let runningMode = "VIDEO";
-        let webcamRunning = false;
-
-        const video = document.getElementById("webcam");
-        const canvasElement = document.getElementById("output_canvas");
-        const canvasCtx = canvasElement.getContext("2d");
-        const enableWebcamButton = document.getElementById("enableWebcamButton");
-        const btnText = document.getElementById("btn-text");
-        const statusOverlay = document.getElementById("status-overlay");
-        const statusText = document.getElementById("status-text");
-        const warningMessage = document.getElementById("warning-message");
-        const glowOverlay = document.getElementById("glow-overlay");
-        const dashboardOverlay = document.getElementById("dashboard-overlay");
-        const stateIndicator = document.getElementById("state-indicator");
-        const sessionTimerEl = document.getElementById("session-timer");
-        const concentrationBar = document.getElementById("concentration-bar");
-
-        let baseDistractionThreshold = 0.035;
-        let distractionThreshold = baseDistractionThreshold;
-        let ratioThresholds = { max: 1.8, min: 0.55 };
-        let audioEnabled = true;
-
-        let distractedTimer = null;
-        let isDistracted = false;
-        let sessionStartTime = null;
-        let timerInterval = null;
-        let concentrationScore = 100;
-        let currentState = "";
-
-        function updateTimer() {
-            if (!sessionStartTime) return;
-            const diff = Math.floor((Date.now() - sessionStartTime) / 1000);
-            const m = Math.floor(diff / 60).toString().padStart(2, '0');
-            const s = (diff % 60).toString().padStart(2, '0');
-            sessionTimerEl.innerText = `${m}:${s}`;
-        }
-
-        function updateStateUI(state) {
-            if (currentState === state) return;
-            currentState = state;
-            stateIndicator.className = 'state-indicator';
-            switch (state) {
-                case 'FOCUSED':
-                    stateIndicator.innerText = "Enfocado";
-                    stateIndicator.classList.add('state-focused');
-                    break;
-                case 'MEDIUM':
-                    stateIndicator.innerText = "Atención media";
-                    stateIndicator.classList.add('state-medium');
-                    break;
-                case 'DISTRACTED':
-                    stateIndicator.innerText = "Distracción";
-                    stateIndicator.classList.add('state-distracted');
-                    break;
-                case 'NO_FACE':
-                    stateIndicator.innerText = "No se detecta rostro";
-                    stateIndicator.classList.add('state-noface');
-                    break;
-            }
-        }
-
-        async function initializeFaceLandmarker() {
-            statusText.innerText = "Cargando modelos de IA...";
-            const vision = await FilesetResolver.forVisionTasks(
-                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm"
-            );
-
-            // Load Face Landmarker
-            faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
-                baseOptions: {
-                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
-                    delegate: "GPU"
-                },
-                outputFaceBlendshapes: false, // Optimization: Disabled to load faster
-                outputFacialTransformationMatrixes: false, // Optimization: Not needed
-                runningMode: runningMode,
-                numFaces: 1
-            });
-
-
-
-            statusText.innerText = "Modelos cargados. Listo.";
-            enableWebcamButton.disabled = false;
-        }
-
-        initializeFaceLandmarker();
-
-        function hasGetUserMedia() {
-            return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
-        }
-
-        if (hasGetUserMedia()) {
-            enableWebcamButton.addEventListener("click", enableCam);
-        } else {
-            console.warn("getUserMedia() is not supported by your browser");
-            btnText.innerText = "Navegador no soportado";
-        }
-
-        function enableCam(event) {
-            if (!faceLandmarker) {
-                console.log("Wait! faceLandmarker not loaded yet.");
-                return;
-            }
-
-            if (webcamRunning === true) {
-                webcamRunning = false;
-                btnText.innerText = "Habilitar Cámara";
-                statusOverlay.classList.remove("hidden");
-                statusText.innerText = "Cámara detenida";
-                stopVideoStream();
-            } else {
-                webcamRunning = true;
-                btnText.innerText = "Detener Cámara";
-                statusOverlay.classList.add("hidden");
-                audioService.init();
-
-                dashboardOverlay.classList.remove("hidden");
-                sessionStartTime = Date.now();
-                concentrationScore = 100;
-                concentrationBar.style.width = "100%";
-                updateTimer();
-                timerInterval = setInterval(updateTimer, 1000);
-
-                // Optimization: Limit webcam resolution to lower quality
-                const constraints = { 
-                    video: { 
-                        width: { ideal: 640 }, 
-                        height: { ideal: 480 } 
-                    } 
-                };
-                navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
-                    video.srcObject = stream;
-                    video.addEventListener("loadeddata", predictWebcam);
-                });
-            }
-        }
-
-        function stopVideoStream() {
-            const stream = video.srcObject;
-            if (stream) {
-                const tracks = stream.getTracks();
-                tracks.forEach(function (track) {
-                    track.stop();
-                });
-                video.srcObject = null;
-            }
-            audioService.stopBeep();
-            hideWarning();
-            glowOverlay.className = 'glow-overlay'; // Clear glow when stopped
-
-            dashboardOverlay.classList.add("hidden");
-            clearInterval(timerInterval);
-            sessionStartTime = null;
-            currentState = "";
-        }
-
-        let lastVideoTime = -1;
-        let results = undefined;
-        let drawingUtils = null;
-        function predictWebcam() {
-            if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) {
-                if (webcamRunning === true) {
-                    window.requestAnimationFrame(predictWebcam);
-                }
-                return;
-            }
-
-            if (!drawingUtils) drawingUtils = new DrawingUtils(canvasCtx);
-
-            // Set internal canvas resolution to match video only if changed
-            if (canvasElement.width !== video.videoWidth) {
-                canvasElement.width = video.videoWidth;
-                canvasElement.height = video.videoHeight;
-            }
-
-            if (runningMode === "IMAGE") {
-                runningMode = "VIDEO";
-                faceLandmarker.setOptions({ runningMode: runningMode });
-            }
-
-            let startTimeMs = performance.now();
-            if (lastVideoTime !== video.currentTime) {
-                lastVideoTime = video.currentTime;
-                results = faceLandmarker.detectForVideo(video, startTimeMs);
-            }
-
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-
-            if (results && results.faceLandmarks && results.faceLandmarks.length > 0) {
-                for (const landmarks of results.faceLandmarks) {
-                    drawingUtils.drawConnectors(
-                        landmarks,
-                        FaceLandmarker.FACE_LANDMARKS_TESSELATION,
-                        { color: "rgba(241, 225, 211, 0.4)", lineWidth: 1 }
-                    );
-
-                    const nose = landmarks[1];
-                    const leftCheek = landmarks[234];
-                    const rightCheek = landmarks[454];
-
-                    const leftDist = Math.abs(nose.x - leftCheek.x);
-                    const rightDist = Math.abs(nose.x - rightCheek.x);
-
-                    let ratio = 1;
-                    if (rightDist > 0) ratio = leftDist / rightDist;
-
-                    const topHead = landmarks[10];
-                    const bottomChin = landmarks[152];
-                    const verticalCenter = (topHead.y + bottomChin.y) / 2;
-                    const pitchDeviation = Math.abs(nose.y - verticalCenter);
-
-                    // Gaze tracking point
-                    const gazeX = nose.x + (nose.x - (leftCheek.x + rightCheek.x) / 2) * 1.5;
-                    const gazeY = nose.y + (nose.y - verticalCenter) * 1.5;
-                    canvasCtx.beginPath();
-                    canvasCtx.arc(gazeX * canvasElement.width, gazeY * canvasElement.height, 4, 0, 2 * Math.PI);
-                    canvasCtx.fillStyle = "rgba(0, 255, 136, 0.9)";
-                    canvasCtx.fill();
-
-                    const isDistracted = ratio > ratioThresholds.max || ratio < ratioThresholds.min || pitchDeviation > distractionThreshold;
-                    const isMedium = !isDistracted && (ratio > 1 + (ratioThresholds.max - 1) * 0.6 || ratio < 1 - (1 - ratioThresholds.min) * 0.6 || pitchDeviation > distractionThreshold * 0.7);
-
-                    if (isDistracted) {
-                        handleDistraction('DISTRACTED');
-                        concentrationScore -= 1;
-                    } else if (isMedium) {
-                        handleAttention('MEDIUM');
-                        concentrationScore -= 0.2;
-                    } else {
-                        handleAttention('FOCUSED');
-                        concentrationScore += 0.5;
-                    }
-                }
-            } else {
-                handleDistraction('NO_FACE');
-                concentrationScore -= 2;
-            }
-
-            if (webcamRunning) {
-                // Clamp and update concentration bar
-                concentrationScore = Math.max(0, Math.min(100, concentrationScore));
-                concentrationBar.style.width = concentrationScore + "%";
-
-                // Color concentration bar based on score
-                if (concentrationScore > 70) concentrationBar.style.backgroundColor = "var(--success)";
-                else if (concentrationScore > 30) concentrationBar.style.backgroundColor = "#fbbf24"; // Yellow
-                else concentrationBar.style.backgroundColor = "var(--warning)";
-            }
-
-            if (webcamRunning === true) {
-                window.requestAnimationFrame(predictWebcam);
-            }
-        }
-
-        function handleDistraction(state) {
-            updateStateUI(state);
-            if (!isDistracted) {
-                isDistracted = true;
-                distractedTimer = setTimeout(() => {
-                    showWarning();
-                    if (audioEnabled) audioService.playBeep();
-                }, 100);
-            }
-        }
-
-        function handleAttention(state) {
-            updateStateUI(state);
-            if (isDistracted) {
-                clearTimeout(distractedTimer);
-                isDistracted = false;
-                hideWarning();
-                audioService.stopBeep();
-                // Reset timer when the user returns to focus
-                sessionStartTime = Date.now();
-                updateTimer();
-            }
-        }
-
-        function showWarning() {
-            warningMessage.classList.remove('hidden');
-            glowOverlay.className = 'glow-overlay glow-red';
-        }
-
-        function hideWarning() {
-            warningMessage.classList.add('hidden');
-            glowOverlay.className = 'glow-overlay glow-green';
         }
     </script>
-</body>
 
+    <script type="module">
+        import * as THREE from 'three';
+        import {
+            FaceLandmarker,
+            ImageSegmenter,
+            FilesetResolver
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+        // --- REFERENCIAS DOM ---
+        const video = document.getElementById('webcam');
+        const userCanvas = document.getElementById('user-canvas');
+        const userCtx = userCanvas.getContext('2d', { willReadFrequently: true });
+        const threeCanvas = document.getElementById('threejs-canvas');
+        
+        const startBtn = document.getElementById('start-btn');
+        const statusText = document.getElementById('status-text');
+        const attentiveIndicator = document.getElementById('attentive-indicator');
+        
+        const toggleMaskBtn = document.getElementById('toggle-mask-btn');
+        const toggleMirrorBtn = document.getElementById('toggle-mirror-btn');
+        
+        // --- ESTADO GLOBAL ---
+        let faceLandmarker, imageSegmenter;
+        let isAttentive = false;
+        let lastVideoTime = -1;
+        let isPlaying = false;
+        let segmentationResult = null;
+        let offscreenCanvas, offscreenCtx;
+        
+        // Configuraciones ajustables
+        let invertMask = true; // El usuario indicó que estaba invertido, así que por defecto lo invertimos
+        let mirrorCamera = true; // Por defecto modo espejo
+
+        toggleMaskBtn.addEventListener('click', () => {
+            invertMask = !invertMask;
+        });
+        
+        toggleMirrorBtn.addEventListener('click', () => {
+            mirrorCamera = !mirrorCamera;
+        });
+
+        // --- CONFIGURACIÓN THREE.JS ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ 
+            canvas: threeCanvas, 
+            alpha: false, 
+            antialias: true 
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        
+        // Cargar imagen de fondo proporcionada por el usuario
+        const textureLoader = new THREE.TextureLoader();
+        const bgPlaneGeo = new THREE.PlaneGeometry(32, 18); // Formato 16:9 amplio
+        
+        // Material base en caso de que no haya imagen aún
+        const bgPlaneMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x0a101f, // Color oscuro espacial por defecto
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+        
+        // Intentar cargar la textura
+        textureLoader.load(
+            'background.jpg', 
+            (texture) => {
+                texture.colorSpace = THREE.SRGBColorSpace;
+                bgPlaneMaterial.map = texture;
+                bgPlaneMaterial.color.setHex(0xffffff); // Quitar color tint
+                bgPlaneMaterial.needsUpdate = true;
+                console.log("Imagen de fondo cargada exitosamente.");
+            },
+            undefined,
+            (error) => {
+                console.warn("No se encontró background.jpg. Asegúrate de guardar la imagen en la carpeta.");
+            }
+        );
+        
+        const bgPlane = new THREE.Mesh(bgPlaneGeo, bgPlaneMaterial);
+        bgPlane.position.z = -10;
+        scene.add(bgPlane);
+
+        // Añadir partículas de polvo/magia para mayor inmersión
+        const particlesGeometry = new THREE.BufferGeometry();
+        const particlesCount = 800;
+        const posArray = new Float32Array(particlesCount * 3);
+        const scaleArray = new Float32Array(particlesCount);
+        
+        for(let i = 0; i < particlesCount * 3; i+=3) {
+            posArray[i] = (Math.random() - 0.5) * 30;     // X
+            posArray[i+1] = (Math.random() - 0.5) * 20;   // Y
+            posArray[i+2] = (Math.random() - 0.5) * 15 - 5; // Z (un poco hacia atrás)
+            scaleArray[i/3] = Math.random();
+        }
+        
+        particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+        particlesGeometry.setAttribute('aScale', new THREE.BufferAttribute(scaleArray, 1));
+        
+        const particlesMaterial = new THREE.PointsMaterial({
+            size: 0.08,
+            color: 0xaaffff,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        
+        const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
+        scene.add(particlesMesh);
+        camera.position.z = 0;
+
+        // Manejar redimensionamiento
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            resizeCanvas();
+        });
+
+        // --- INICIALIZACIÓN DE MEDIAPIPE ---
+        async function initMediaPipe() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm"
+                );
+
+                imageSegmenter = await ImageSegmenter.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    outputCategoryMask: false,
+                    outputConfidenceMasks: true
+                });
+
+                // Configurar FaceLandmarker para detectar atención
+                faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numFaces: 1
+                });
+
+                statusText.innerText = "Sistemas IA preparados.";
+                startBtn.disabled = false;
+                startBtn.innerText = "Activar Espejo Mágico";
+            } catch (error) {
+                statusText.innerText = "Error cargando modelos: " + error.message;
+                console.error(error);
+            }
+        }
+
+        initMediaPipe();
+
+        // --- CONTROL DE CÁMARA Y APLICACIÓN ---
+        startBtn.addEventListener('click', async () => {
+            if (isPlaying) {
+                stopApp();
+                return;
+            }
+            startBtn.innerText = "Iniciando...";
+            startBtn.disabled = true;
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }
+                });
+                
+                video.srcObject = stream;
+                video.addEventListener('loadeddata', () => {
+                    isPlaying = true;
+                    startBtn.innerText = "Detener Espejo";
+                    startBtn.disabled = false;
+                    statusText.innerText = "Escaneando entorno...";
+                    
+                    resizeCanvas();
+                    initOffscreenCanvas();
+                    
+                    // Iniciar bucle principal
+                    requestAnimationFrame(renderLoop);
+                });
+            } catch (err) {
+                statusText.innerText = "Error acceso a cámara. Revisa permisos.";
+                startBtn.disabled = false;
+                startBtn.innerText = "Reintentar";
+            }
+        });
+
+        function stopApp() {
+            isPlaying = false;
+            const stream = video.srcObject;
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            video.srcObject = null;
+            startBtn.innerText = "Activar Espejo Mágico";
+            statusText.innerText = "Sistema en pausa";
+            
+            userCtx.clearRect(0, 0, userCanvas.width, userCanvas.height);
+            threeCanvas.style.opacity = 0;
+            
+            attentiveIndicator.className = "attentive-indicator";
+            attentiveIndicator.innerText = "Esperando cámara...";
+        }
+
+        function resizeCanvas() {
+            if (video.videoWidth === 0) return;
+            // Ajustar al tamaño real de la cámara
+            userCanvas.width = video.videoWidth;
+            userCanvas.height = video.videoHeight;
+            // Hacer que ocupe toda la pantalla manteniendo la proporción
+            userCanvas.style.width = '100vw';
+            userCanvas.style.height = '100vh';
+        }
+
+        function initOffscreenCanvas() {
+            if (!offscreenCanvas) {
+                offscreenCanvas = document.createElement('canvas');
+                offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+            }
+            offscreenCanvas.width = video.videoWidth;
+            offscreenCanvas.height = video.videoHeight;
+        }
+
+        // --- BUCLE PRINCIPAL (RENDER LOOP) ---
+        function renderLoop() {
+            if (!isPlaying) return;
+
+            // 1. Animar entorno Three.js (Partículas levitando)
+            particlesMesh.rotation.y += 0.0005;
+            particlesMesh.rotation.x += 0.0002;
+            const time = Date.now() * 0.001;
+            particlesMesh.position.y = Math.sin(time * 0.5) * 0.2; // Flotación suave
+            
+            renderer.render(scene, camera);
+
+            // 2. Procesamiento de IA (Segmentación y Rostro)
+            const startTimeMs = performance.now();
+            if (lastVideoTime !== video.currentTime) {
+                lastVideoTime = video.currentTime;
+                
+                // Segmentación de fondo
+                imageSegmenter.segmentForVideo(video, startTimeMs, (result) => {
+                    segmentationResult = result;
+                });
+
+                // Detección de atención
+                const faceResults = faceLandmarker.detectForVideo(video, startTimeMs);
+                checkAttention(faceResults);
+            }
+
+            // 3. Composición visual del Espejo
+            drawSegmentedUser();
+
+            // 4. Actualizar estado visual
+            updateUIState();
+
+            // Llamar al siguiente frame
+            requestAnimationFrame(renderLoop);
+        }
+
+        // Variables para suavizar el movimiento de la cabeza
+        let smoothRatio = 1.0;
+        let smoothPitch = 0.0;
+        let attentionFrames = 0; // Para evitar parpadeos (debounce)
+
+        function checkAttention(faceResults) {
+            if (faceResults && faceResults.faceLandmarks && faceResults.faceLandmarks.length > 0) {
+                const landmarks = faceResults.faceLandmarks[0];
+                
+                // Referencias clave
+                const nose = landmarks[1];
+                const leftCheek = landmarks[234];
+                const rightCheek = landmarks[454];
+                const topHead = landmarks[10];
+                const bottomChin = landmarks[152];
+
+                // Calcular rotación horizontal (Yaw)
+                const leftDist = Math.abs(nose.x - leftCheek.x);
+                const rightDist = Math.abs(nose.x - rightCheek.x);
+                let horizontalRatio = 1;
+                if (rightDist > 0) horizontalRatio = leftDist / rightDist;
+
+                // Calcular inclinación vertical (Pitch)
+                const verticalCenter = (topHead.y + bottomChin.y) / 2;
+                const pitchDeviation = Math.abs(nose.y - verticalCenter);
+
+                // Suavizado exponencial (Filtro paso bajo) para eliminar temblores/parpadeos en la detección
+                smoothRatio = smoothRatio * 0.7 + horizontalRatio * 0.3;
+                smoothPitch = smoothPitch * 0.7 + pitchDeviation * 0.3;
+
+                // Criterios de atención: Mira hacia el frente (rango tolerante) y cabeza no muy inclinada
+                const isLookingForward = (smoothRatio >= 0.55 && smoothRatio <= 1.8) && (smoothPitch < 0.07);
+                
+                if (isLookingForward) {
+                    attentionFrames++;
+                    if (attentionFrames > 5) isAttentive = true; // Requiere 5 frames seguidos mirando para activar
+                } else {
+                    attentionFrames = 0;
+                    isAttentive = false;
+                }
+            } else {
+                // Si no hay rostro detectado
+                attentionFrames = 0;
+                isAttentive = false;
+            }
+        }
+
+        function updateUIState() {
+            if (isAttentive) {
+                // Mostrar entorno inmersivo
+                threeCanvas.style.opacity = 1;
+                attentiveIndicator.className = "attentive-indicator active";
+                attentiveIndicator.innerText = "Inmersión Activa";
+                statusText.innerText = "Usuario prestando atención";
+            } else {
+                // Ocultar entorno, mostrar negro (fondo css)
+                threeCanvas.style.opacity = 0;
+                attentiveIndicator.className = "attentive-indicator";
+                attentiveIndicator.innerText = "Atención Perdida";
+                statusText.innerText = "Mira la pantalla para activar el fondo";
+            }
+        }
+
+        function drawSegmentedUser() {
+            if (!segmentationResult || !segmentationResult.categoryMask) return;
+            
+            const w = userCanvas.width;
+            const h = userCanvas.height;
+
+            // Limpiar canvas final
+            userCtx.save();
+            userCtx.clearRect(0, 0, w, h);
+
+            // Efecto Espejo opcional
+            if (mirrorCamera) {
+                userCtx.translate(w, 0);
+                userCtx.scale(-1, 1);
+            }
+
+            // Procesar la máscara de MediaPipe con alta precisión (Confidence Masks)
+            let mask = null;
+            let maskData = null;
+            
+            // SelfieSegmenter con outputConfidenceMasks devuelve un array de máscaras
+            if (segmentationResult.confidenceMasks && segmentationResult.confidenceMasks.length > 0) {
+                // Normalmente el índice 0 es fondo y el 1 es persona, o a veces solo hay un índice.
+                mask = segmentationResult.confidenceMasks.length > 1 ? segmentationResult.confidenceMasks[1] : segmentationResult.confidenceMasks[0];
+                maskData = mask.getAsFloat32Array(); // Valores decimales suaves de 0.0 a 1.0
+            } else if (segmentationResult.categoryMask) {
+                mask = segmentationResult.categoryMask;
+                maskData = mask.getAsUint8Array ? mask.getAsUint8Array() : null;
+            }
+            
+            if (!mask) return;
+            
+            // La máscara puede tener una resolución diferente a la del video original
+            const maskW = mask.width || w;
+            const maskH = mask.height || h;
+            
+            if (offscreenCanvas.width !== maskW || offscreenCanvas.height !== maskH) {
+                offscreenCanvas.width = maskW;
+                offscreenCanvas.height = maskH;
+            }
+            
+            if (maskData) {
+                const imgData = offscreenCtx.createImageData(maskW, maskH);
+                
+                // Determinar el tipo de datos (Float32 para confianza suave, Uint8 para categoría)
+                const isFloat = maskData instanceof Float32Array;
+                
+                for (let i = 0; i < maskData.length; i++) {
+                    let alphaVal = 0;
+                    
+                    if (isFloat) {
+                        // Precisión alta (bordes suaves anti-aliasing)
+                        let confidence = maskData[i];
+                        if (invertMask) confidence = 1.0 - confidence;
+                        alphaVal = Math.round(confidence * 255);
+                    } else {
+                        // Precisión binaria (legacy)
+                        const isForeground = invertMask ? (maskData[i] === 0) : (maskData[i] > 0);
+                        alphaVal = isForeground ? 255 : 0;
+                    }
+
+                    imgData.data[i * 4] = 0;     // R
+                    imgData.data[i * 4 + 1] = 0; // G
+                    imgData.data[i * 4 + 2] = 0; // B
+                    imgData.data[i * 4 + 3] = alphaVal; // Alpha
+                }
+                offscreenCtx.putImageData(imgData, 0, 0);
+            } else {
+                // Fallback por si la API cambia y mask es dibujable directamente
+                offscreenCtx.drawImage(mask, 0, 0, maskW, maskH);
+            }
+
+            // 1. Dibujar el video original en el canvas principal
+            userCtx.drawImage(video, 0, 0, w, h);
+            
+            // 2. Aplicar "destination-in" para que el video SOLO sea visible donde la máscara es opaca (el usuario)
+            userCtx.globalCompositeOperation = 'destination-in';
+            
+            // Ya no aplicamos blur agresivo porque confidenceMasks ya trae bordes suaves de forma nativa
+            // userCtx.filter = 'blur(1px)'; 
+            userCtx.drawImage(offscreenCanvas, 0, 0, w, h);
+            
+            // Restaurar estado
+            userCtx.filter = 'none';
+            userCtx.restore();
+        }
+
+    </script>
+</body>
 </html>

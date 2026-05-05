@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Enfoque+</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="bubbles">
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+        <div class="bubble"></div>
+    </div>
+    <div class="side-controls-right">
+        <label for="volume-slider" title="Volumen de Alarma">🔊</label>
+        <input type="range" id="volume-slider" min="0" max="1" step="0.01" value="0.5">
+    </div>
+
+    <div class="glow-overlay" id="glow-overlay"></div>
+    <div class="app-container">
+        <header>
+            <h1>Enfoque<span>+</span></h1>
+            <p>Enfócate sin distracciones</p>
+        </header>
+
+        <main>
+            <div class="camera-wrapper glass-panel">
+                <video id="webcam" autoplay playsinline></video>
+                <canvas id="output_canvas"></canvas>
+
+
+                <div id="status-overlay" class="status-overlay">
+                    <div class="status-icon" id="status-icon">
+                        <svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="none"
+                            viewBox="0 0 24 24">
+                            <path stroke="currentColor" stroke-width="2"
+                                d="M21 12c0 1.2-4.03 6-9 6s-9-4.8-9-6c0-1.2 4.03-6 9-6s9 4.8 9 6Z" />
+                            <path stroke="currentColor" stroke-width="2" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z" />
+                        </svg>
+                    </div>
+                    <h2 id="status-text">Listo para iniciar</h2>
+                </div>
+            </div>
+
+            <div class="dashboard-overlay hidden" id="dashboard-overlay">
+                <div class="dashboard-header">
+                    <div class="state-indicator state-focused" id="state-indicator">Enfocado</div>
+                    <div class="timer" id="session-timer">00:00</div>
+                </div>
+                <div class="concentration-wrapper">
+                    <span>Concentración</span>
+                    <div class="concentration-bar-container">
+                        <div class="concentration-bar" id="concentration-bar" style="width: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button id="enableWebcamButton" class="btn-primary">
+                    <svg class="btn-icon" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="24" height="24"
+                        fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                    <span class="btn-text" id="btn-text">Habilitar Cámara</span>
+                </button>
+            </div>
+
+            <p class="privacy-notice">🔒 Tu imagen se procesa localmente y no se almacena.</p>
+
+            <div id="warning-message" class="warning-message hidden">
+                Hey, vuelve al foco
+            </div>
+        </main>
+    </div>
+
+    <script type="module">
+        import {
+            FaceLandmarker,
+            FilesetResolver,
+            DrawingUtils
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+
+
+        // --- AUDIO SERVICE (Singleton) ---
+        class AudioService {
+            constructor() {
+                this.audioCtx = null;
+                this.oscillator = null;
+                this.isPlaying = false;
+                this.volume = 0.5;
+            }
+
+            setVolume(value) {
+                this.volume = parseFloat(value);
+            }
+
+            init() {
+                if (!this.audioCtx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.audioCtx = new AudioContext();
+                }
+            }
+
+            playBeep() {
+                if (this.isPlaying) return;
+                this.init();
+                if (this.audioCtx.state === 'suspended') {
+                    this.audioCtx.resume();
+                }
+
+                this.oscillator = this.audioCtx.createOscillator();
+                this.oscillator.type = 'sine';
+                this.oscillator.frequency.setValueAtTime(880, this.audioCtx.currentTime); // A5 note
+
+                const gainNode = this.audioCtx.createGain();
+                if (this.volume === 0) {
+                    gainNode.gain.setValueAtTime(0, this.audioCtx.currentTime);
+                } else {
+                    gainNode.gain.setValueAtTime(0.01, this.audioCtx.currentTime);
+                    gainNode.gain.exponentialRampToValueAtTime(this.volume, this.audioCtx.currentTime + 0.1);
+                }
+
+                this.oscillator.connect(gainNode);
+                gainNode.connect(this.audioCtx.destination);
+                this.oscillator.start();
+                this.isPlaying = true;
+            }
+
+            stopBeep() {
+                if (!this.isPlaying || !this.oscillator) return;
+                this.oscillator.stop();
+                this.oscillator.disconnect();
+                this.oscillator = null;
+                this.isPlaying = false;
+            }
+        }
+
+        const audioService = new AudioService();
+
+        const volumeSlider = document.getElementById("volume-slider");
+        volumeSlider.addEventListener("input", (e) => {
+            audioService.setVolume(e.target.value);
+        });
+
+        // --- VISION SERVICE ---
+        let faceLandmarker;
+        let runningMode = "VIDEO";
+        let webcamRunning = false;
+
+        const video = document.getElementById("webcam");
+        const canvasElement = document.getElementById("output_canvas");
+        const canvasCtx = canvasElement.getContext("2d");
+        const enableWebcamButton = document.getElementById("enableWebcamButton");
+        const btnText = document.getElementById("btn-text");
+        const statusOverlay = document.getElementById("status-overlay");
+        const statusText = document.getElementById("status-text");
+        const warningMessage = document.getElementById("warning-message");
+        const glowOverlay = document.getElementById("glow-overlay");
+        const dashboardOverlay = document.getElementById("dashboard-overlay");
+        const stateIndicator = document.getElementById("state-indicator");
+        const sessionTimerEl = document.getElementById("session-timer");
+        const concentrationBar = document.getElementById("concentration-bar");
+
+        let baseDistractionThreshold = 0.035;
+        let distractionThreshold = baseDistractionThreshold;
+        let ratioThresholds = { max: 1.8, min: 0.55 };
+        let audioEnabled = true;
+
+        let distractedTimer = null;
+        let isDistracted = false;
+        let sessionStartTime = null;
+        let timerInterval = null;
+        let concentrationScore = 100;
+        let currentState = "";
+
+        function updateTimer() {
+            if (!sessionStartTime) return;
+            const diff = Math.floor((Date.now() - sessionStartTime) / 1000);
+            const m = Math.floor(diff / 60).toString().padStart(2, '0');
+            const s = (diff % 60).toString().padStart(2, '0');
+            sessionTimerEl.innerText = `${m}:${s}`;
+        }
+
+        function updateStateUI(state) {
+            if (currentState === state) return;
+            currentState = state;
+            stateIndicator.className = 'state-indicator';
+            switch (state) {
+                case 'FOCUSED':
+                    stateIndicator.innerText = "Enfocado";
+                    stateIndicator.classList.add('state-focused');
+                    break;
+                case 'MEDIUM':
+                    stateIndicator.innerText = "Atención media";
+                    stateIndicator.classList.add('state-medium');
+                    break;
+                case 'DISTRACTED':
+                    stateIndicator.innerText = "Distracción";
+                    stateIndicator.classList.add('state-distracted');
+                    break;
+                case 'NO_FACE':
+                    stateIndicator.innerText = "No se detecta rostro";
+                    stateIndicator.classList.add('state-noface');
+                    break;
+            }
+        }
+
+        async function initializeFaceLandmarker() {
+            statusText.innerText = "Cargando modelos de IA...";
+            const vision = await FilesetResolver.forVisionTasks(
+                "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm"
+            );
+
+            // Load Face Landmarker
+            faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+                baseOptions: {
+                    modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+                    delegate: "GPU"
+                },
+                outputFaceBlendshapes: false, // Optimization: Disabled to load faster
+                outputFacialTransformationMatrixes: false, // Optimization: Not needed
+                runningMode: runningMode,
+                numFaces: 1
+            });
+
+
+
+            statusText.innerText = "Modelos cargados. Listo.";
+            enableWebcamButton.disabled = false;
+        }
+
+        initializeFaceLandmarker();
+
+        function hasGetUserMedia() {
+            return !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+        }
+
+        if (hasGetUserMedia()) {
+            enableWebcamButton.addEventListener("click", enableCam);
+        } else {
+            console.warn("getUserMedia() is not supported by your browser");
+            btnText.innerText = "Navegador no soportado";
+        }
+
+        function enableCam(event) {
+            if (!faceLandmarker) {
+                console.log("Wait! faceLandmarker not loaded yet.");
+                return;
+            }
+
+            if (webcamRunning === true) {
+                webcamRunning = false;
+                btnText.innerText = "Habilitar Cámara";
+                statusOverlay.classList.remove("hidden");
+                statusText.innerText = "Cámara detenida";
+                stopVideoStream();
+            } else {
+                webcamRunning = true;
+                btnText.innerText = "Detener Cámara";
+                statusOverlay.classList.add("hidden");
+                audioService.init();
+
+                dashboardOverlay.classList.remove("hidden");
+                sessionStartTime = Date.now();
+                concentrationScore = 100;
+                concentrationBar.style.width = "100%";
+                updateTimer();
+                timerInterval = setInterval(updateTimer, 1000);
+
+                // Optimization: Limit webcam resolution to lower quality
+                const constraints = { 
+                    video: { 
+                        width: { ideal: 640 }, 
+                        height: { ideal: 480 } 
+                    } 
+                };
+                navigator.mediaDevices.getUserMedia(constraints).then((stream) => {
+                    video.srcObject = stream;
+                    video.addEventListener("loadeddata", predictWebcam);
+                });
+            }
+        }
+
+        function stopVideoStream() {
+            const stream = video.srcObject;
+            if (stream) {
+                const tracks = stream.getTracks();
+                tracks.forEach(function (track) {
+                    track.stop();
+                });
+                video.srcObject = null;
+            }
+            audioService.stopBeep();
+            hideWarning();
+            glowOverlay.className = 'glow-overlay'; // Clear glow when stopped
+
+            dashboardOverlay.classList.add("hidden");
+            clearInterval(timerInterval);
+            sessionStartTime = null;
+            currentState = "";
+        }
+
+        let lastVideoTime = -1;
+        let results = undefined;
+        let drawingUtils = null;
+        function predictWebcam() {
+            if (video.videoWidth === 0 || video.videoHeight === 0 || video.readyState < 2) {
+                if (webcamRunning === true) {
+                    window.requestAnimationFrame(predictWebcam);
+                }
+                return;
+            }
+
+            if (!drawingUtils) drawingUtils = new DrawingUtils(canvasCtx);
+
+            // Set internal canvas resolution to match video only if changed
+            if (canvasElement.width !== video.videoWidth) {
+                canvasElement.width = video.videoWidth;
+                canvasElement.height = video.videoHeight;
+            }
+
+            if (runningMode === "IMAGE") {
+                runningMode = "VIDEO";
+                faceLandmarker.setOptions({ runningMode: runningMode });
+            }
+
+            let startTimeMs = performance.now();
+            if (lastVideoTime !== video.currentTime) {
+                lastVideoTime = video.currentTime;
+                results = faceLandmarker.detectForVideo(video, startTimeMs);
+            }
+
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+
+            if (results && results.faceLandmarks && results.faceLandmarks.length > 0) {
+                for (const landmarks of results.faceLandmarks) {
+                    drawingUtils.drawConnectors(
+                        landmarks,
+                        FaceLandmarker.FACE_LANDMARKS_TESSELATION,
+                        { color: "rgba(241, 225, 211, 0.4)", lineWidth: 1 }
+                    );
+
+                    const nose = landmarks[1];
+                    const leftCheek = landmarks[234];
+                    const rightCheek = landmarks[454];
+
+                    const leftDist = Math.abs(nose.x - leftCheek.x);
+                    const rightDist = Math.abs(nose.x - rightCheek.x);
+
+                    let ratio = 1;
+                    if (rightDist > 0) ratio = leftDist / rightDist;
+
+                    const topHead = landmarks[10];
+                    const bottomChin = landmarks[152];
+                    const verticalCenter = (topHead.y + bottomChin.y) / 2;
+                    const pitchDeviation = Math.abs(nose.y - verticalCenter);
+
+                    // Gaze tracking point
+                    const gazeX = nose.x + (nose.x - (leftCheek.x + rightCheek.x) / 2) * 1.5;
+                    const gazeY = nose.y + (nose.y - verticalCenter) * 1.5;
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(gazeX * canvasElement.width, gazeY * canvasElement.height, 4, 0, 2 * Math.PI);
+                    canvasCtx.fillStyle = "rgba(0, 255, 136, 0.9)";
+                    canvasCtx.fill();
+
+                    const isDistracted = ratio > ratioThresholds.max || ratio < ratioThresholds.min || pitchDeviation > distractionThreshold;
+                    const isMedium = !isDistracted && (ratio > 1 + (ratioThresholds.max - 1) * 0.6 || ratio < 1 - (1 - ratioThresholds.min) * 0.6 || pitchDeviation > distractionThreshold * 0.7);
+
+                    if (isDistracted) {
+                        handleDistraction('DISTRACTED');
+                        concentrationScore -= 1;
+                    } else if (isMedium) {
+                        handleAttention('MEDIUM');
+                        concentrationScore -= 0.2;
+                    } else {
+                        handleAttention('FOCUSED');
+                        concentrationScore += 0.5;
+                    }
+                }
+            } else {
+                handleDistraction('NO_FACE');
+                concentrationScore -= 2;
+            }
+
+            if (webcamRunning) {
+                // Clamp and update concentration bar
+                concentrationScore = Math.max(0, Math.min(100, concentrationScore));
+                concentrationBar.style.width = concentrationScore + "%";
+
+                // Color concentration bar based on score
+                if (concentrationScore > 70) concentrationBar.style.backgroundColor = "var(--success)";
+                else if (concentrationScore > 30) concentrationBar.style.backgroundColor = "#fbbf24"; // Yellow
+                else concentrationBar.style.backgroundColor = "var(--warning)";
+            }
+
+            if (webcamRunning === true) {
+                window.requestAnimationFrame(predictWebcam);
+            }
+        }
+
+        function handleDistraction(state) {
+            updateStateUI(state);
+            if (!isDistracted) {
+                isDistracted = true;
+                distractedTimer = setTimeout(() => {
+                    showWarning();
+                    if (audioEnabled) audioService.playBeep();
+                }, 100);
+            }
+        }
+
+        function handleAttention(state) {
+            updateStateUI(state);
+            if (isDistracted) {
+                clearTimeout(distractedTimer);
+                isDistracted = false;
+                hideWarning();
+                audioService.stopBeep();
+                // Reset timer when the user returns to focus
+                sessionStartTime = Date.now();
+                updateTimer();
+            }
+        }
+
+        function showWarning() {
+            warningMessage.classList.remove('hidden');
+            glowOverlay.className = 'glow-overlay glow-red';
+        }
+
+        function hideWarning() {
+            warningMessage.classList.add('hidden');
+            glowOverlay.className = 'glow-overlay glow-green';
+        }
+    </script>
+</body>
+
+</html>

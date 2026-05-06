@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+    <title>Experiencia AR - Escanea el QR</title>
+    
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="./style.css">
+
+    <!-- A-Frame -->
+    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+    
+    <!-- MindAR for A-Frame (IMAGE TRACKING) -->
+    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+
+    <!-- Custom Logic -->
+    <script src="./app.js"></script>
+</head>
+<body>
+
+    <div id="ui-container">
+        <!-- Loading Screen -->
+        <div id="loading-screen" class="glass-panel">
+            <div class="spinner"></div>
+            <h1 id="loading-text">Iniciando motor AR...</h1>
+            <p>Por favor, otorga permisos de cámara si el navegador lo solicita.</p>
+        </div>
+
+        <!-- Scanning Dialog -->
+        <div id="scanning-dialog" class="glass-panel hidden">
+            <div class="scan-icon">
+                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
+                    <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
+                    <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
+                    <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
+                </svg>
+            </div>
+            <h1>Buscando Código...</h1>
+            <p>Apunta la cámara hacia la imagen que compilaste (TARGET.jpg).</p>
+        </div>
+
+        <!-- Success Dialog -->
+        <div id="success-dialog" class="glass-panel success hidden">
+            <div class="spinner"></div>
+            <h1>¡Objetivo Encontrado!</h1>
+            <p>Iniciando corona facial...</p>
+        </div>
+    </div>
+
+    <!-- AR Scene (Image Tracking) -->
+    <a-scene 
+        mindar-image="imageTargetSrc: ./TARGET.mind; autoStart: true; uiScanning: no; uiLoading: no;" 
+        color-space="sRGB" 
+        renderer="colorManagement: true, physicallyCorrectLights: true" 
+        vr-mode-ui="enabled: false" 
+        device-orientation-permission-ui="enabled: false">
+        
+        <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+
+        <!-- No ponemos el modelo aquí, solo usamos esto como un escáner invisible -->
+        <a-entity mindar-image-target="targetIndex: 0" target-event-handler></a-entity>
+
+    </a-scene>
+
+</body>
+</html>

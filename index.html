@@ -2,67 +2,577 @@
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Experiencia AR - Escanea el QR</title>
-    
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;500;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="./style.css">
-
-    <!-- A-Frame -->
-    <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
-    
-    <!-- MindAR for A-Frame (IMAGE TRACKING) -->
-    <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
-
-    <!-- Custom Logic -->
-    <script src="./app.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Mirror AR</title>
+    <style>
+        body, html { 
+            margin: 0; 
+            padding: 0; 
+            overflow: hidden; 
+            background-color: #000; 
+            width: 100vw; 
+            height: 100vh; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+        }
+        
+        #webcam { display: none; }
+        
+        .canvas-container { 
+            position: relative; 
+            width: 100vw; 
+            height: 100vh; 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+        }
+        
+        /* Three.js canvas para el entorno virtual */
+        #threejs-canvas { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            z-index: 1; 
+            transition: opacity 0.8s ease-in-out; 
+            opacity: 0; /* Oculto inicialmente */
+        }
+        
+        /* Canvas para el usuario segmentado */
+        #user-canvas { 
+            position: absolute; 
+            top: 0; 
+            left: 0; 
+            width: 100%; 
+            height: 100%; 
+            z-index: 2; 
+            object-fit: contain; 
+        }
+        
+        #ui-layer { 
+            position: absolute; 
+            top: 20px; 
+            left: 20px; 
+            z-index: 10; 
+            color: white; 
+            background: rgba(10, 15, 30, 0.6); 
+            padding: 20px; 
+            border-radius: 15px; 
+            backdrop-filter: blur(10px); 
+            border: 1px solid rgba(255,255,255,0.1);
+            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.5);
+            max-width: 300px;
+        }
+        
+        h2 { margin: 0 0 15px 0; font-size: 22px; font-weight: 600; letter-spacing: 0.5px; }
+        
+        .hidden { display: none !important; }
+        
+        #start-btn { 
+            padding: 12px 20px; 
+            font-size: 16px; 
+            cursor: pointer; 
+            background: linear-gradient(135deg, #00ff88 0%, #00b3ff 100%); 
+            color: #000; 
+            border: none; 
+            border-radius: 8px; 
+            font-weight: 700; 
+            width: 100%;
+            transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); 
+            box-shadow: 0 4px 15px rgba(0, 255, 136, 0.3);
+        }
+        
+        #start-btn:hover { 
+            transform: translateY(-2px); 
+            box-shadow: 0 6px 20px rgba(0, 255, 136, 0.5); 
+        }
+        
+        #start-btn:disabled { 
+            background: #444; 
+            color: #888;
+            cursor: not-allowed; 
+            transform: none; 
+            box-shadow: none;
+        }
+        
+        .status { 
+            margin-top: 15px; 
+            font-size: 14px; 
+            color: #ddd;
+        }
+        
+        .attentive-indicator { 
+            margin-top: 15px; 
+            padding: 8px 10px; 
+            border-radius: 6px; 
+            background: rgba(255, 50, 50, 0.8); 
+            color: white; 
+            font-weight: bold; 
+            text-align: center; 
+            transition: background-color 0.4s ease;
+        }
+        
+        .attentive-indicator.active { 
+            background: rgba(0, 255, 136, 0.8); 
+            color: black; 
+        }
+        
+        .instructions {
+            font-size: 12px;
+            color: #aaa;
+            margin-top: 15px;
+            line-height: 1.4;
+            padding-top: 10px;
+            border-top: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .controls-row {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+        }
+        
+        .small-btn {
+            padding: 6px 10px;
+            font-size: 12px;
+            background: rgba(255,255,255,0.1);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.2);
+            border-radius: 4px;
+            cursor: pointer;
+            flex: 1;
+        }
+        .small-btn:hover {
+            background: rgba(255,255,255,0.2);
+        }
+    </style>
 </head>
 <body>
 
-    <div id="ui-container">
-        <!-- Loading Screen -->
-        <div id="loading-screen" class="glass-panel">
-            <div class="spinner"></div>
-            <h1 id="loading-text">Iniciando motor AR...</h1>
-            <p>Por favor, otorga permisos de cámara si el navegador lo solicita.</p>
-        </div>
+    <div class="canvas-container">
+        <!-- Elemento de video original oculto -->
+        <video id="webcam" autoplay playsinline></video>
+        <!-- Canvas para renderizar la escena Three.js -->
+        <canvas id="threejs-canvas"></canvas>
+        <!-- Canvas para dibujar al usuario recortado -->
+        <canvas id="user-canvas"></canvas>
+    </div>
 
-        <!-- Scanning Dialog -->
-        <div id="scanning-dialog" class="glass-panel hidden">
-            <div class="scan-icon">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M3 7V5a2 2 0 0 1 2-2h2"></path>
-                    <path d="M17 3h2a2 2 0 0 1 2 2v2"></path>
-                    <path d="M21 17v2a2 2 0 0 1-2 2h-2"></path>
-                    <path d="M7 21H5a2 2 0 0 1-2-2v-2"></path>
-                </svg>
-            </div>
-            <h1>Buscando Código...</h1>
-            <p>Apunta la cámara hacia la imagen que compilaste (TARGET.jpg).</p>
+    <!-- Interfaz de Usuario -->
+    <div id="ui-layer">
+        <h2>Smart Mirror AR</h2>
+        <button id="start-btn" disabled>Cargando IA...</button>
+        <div class="status" id="status-text">Inicializando MediaPipe y Three.js...</div>
+        <div class="attentive-indicator" id="attentive-indicator">Esperando cámara...</div>
+        <div class="instructions">
+            <b>Instrucción:</b> Por favor, guarda la imagen anime deseada como <code>background.jpg</code> en la misma carpeta que este archivo HTML para verla de fondo.
         </div>
-
-        <!-- Success Dialog -->
-        <div id="success-dialog" class="glass-panel success hidden">
-            <div class="spinner"></div>
-            <h1>¡Objetivo Encontrado!</h1>
-            <p>Iniciando corona facial...</p>
+        <div class="controls-row">
+            <button id="toggle-mask-btn" class="small-btn">Invertir Máscara</button>
+            <button id="toggle-mirror-btn" class="small-btn">Invertir Espejo</button>
         </div>
     </div>
 
-    <!-- AR Scene (Image Tracking) -->
-    <a-scene 
-        mindar-image="imageTargetSrc: ./TARGET.mind; autoStart: true; uiScanning: no; uiLoading: no;" 
-        color-space="sRGB" 
-        renderer="colorManagement: true, physicallyCorrectLights: true" 
-        vr-mode-ui="enabled: false" 
-        device-orientation-permission-ui="enabled: false">
+    <!-- Importación de módulos Three.js -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import {
+            FaceLandmarker,
+            ImageSegmenter,
+            FilesetResolver
+        } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/vision_bundle.mjs";
+
+        // --- REFERENCIAS DOM ---
+        const video = document.getElementById('webcam');
+        const userCanvas = document.getElementById('user-canvas');
+        const userCtx = userCanvas.getContext('2d', { willReadFrequently: true });
+        const threeCanvas = document.getElementById('threejs-canvas');
         
-        <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+        const startBtn = document.getElementById('start-btn');
+        const statusText = document.getElementById('status-text');
+        const attentiveIndicator = document.getElementById('attentive-indicator');
+        
+        const toggleMaskBtn = document.getElementById('toggle-mask-btn');
+        const toggleMirrorBtn = document.getElementById('toggle-mirror-btn');
+        
+        // --- ESTADO GLOBAL ---
+        let faceLandmarker, imageSegmenter;
+        let isAttentive = false;
+        let lastVideoTime = -1;
+        let isPlaying = false;
+        let segmentationResult = null;
+        let offscreenCanvas, offscreenCtx;
+        
+        // Configuraciones ajustables
+        let invertMask = true; // El usuario indicó que estaba invertido, así que por defecto lo invertimos
+        let mirrorCamera = true; // Por defecto modo espejo
 
-        <!-- No ponemos el modelo aquí, solo usamos esto como un escáner invisible -->
-        <a-entity mindar-image-target="targetIndex: 0" target-event-handler></a-entity>
+        toggleMaskBtn.addEventListener('click', () => {
+            invertMask = !invertMask;
+        });
+        
+        toggleMirrorBtn.addEventListener('click', () => {
+            mirrorCamera = !mirrorCamera;
+        });
 
-    </a-scene>
+        // --- CONFIGURACIÓN THREE.JS ---
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        
+        const renderer = new THREE.WebGLRenderer({ 
+            canvas: threeCanvas, 
+            alpha: false, 
+            antialias: true 
+        });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        
+        // Cargar imagen de fondo proporcionada por el usuario
+        const textureLoader = new THREE.TextureLoader();
+        const bgPlaneGeo = new THREE.PlaneGeometry(32, 18); // Formato 16:9 amplio
+        
+        // Material base en caso de que no haya imagen aún
+        const bgPlaneMaterial = new THREE.MeshBasicMaterial({ 
+            color: 0x0a101f, // Color oscuro espacial por defecto
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+        
+        // Intentar cargar la textura
+        textureLoader.load(
+            'background.jpg', 
+            (texture) => {
+                texture.colorSpace = THREE.SRGBColorSpace;
+                bgPlaneMaterial.map = texture;
+                bgPlaneMaterial.color.setHex(0xffffff); // Quitar color tint
+                bgPlaneMaterial.needsUpdate = true;
+                console.log("Imagen de fondo cargada exitosamente.");
+            },
+            undefined,
+            (error) => {
+                console.warn("No se encontró background.jpg. Asegúrate de guardar la imagen en la carpeta.");
+            }
+        );
+        
+        const bgPlane = new THREE.Mesh(bgPlaneGeo, bgPlaneMaterial);
+        bgPlane.position.z = -10;
+        scene.add(bgPlane);
 
+        // Añadir partículas de polvo/magia para mayor inmersión
+        const particlesGeometry = new THREE.BufferGeometry();
+        const particlesCount = 800;
+        const posArray = new Float32Array(particlesCount * 3);
+        const scaleArray = new Float32Array(particlesCount);
+        
+        for(let i = 0; i < particlesCount * 3; i+=3) {
+            posArray[i] = (Math.random() - 0.5) * 30;     // X
+            posArray[i+1] = (Math.random() - 0.5) * 20;   // Y
+            posArray[i+2] = (Math.random() - 0.5) * 15 - 5; // Z (un poco hacia atrás)
+            scaleArray[i/3] = Math.random();
+        }
+        
+        particlesGeometry.setAttribute('position', new THREE.BufferAttribute(posArray, 3));
+        particlesGeometry.setAttribute('aScale', new THREE.BufferAttribute(scaleArray, 1));
+        
+        const particlesMaterial = new THREE.PointsMaterial({
+            size: 0.08,
+            color: 0xaaffff,
+            transparent: true,
+            opacity: 0.8,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+        });
+        
+        const particlesMesh = new THREE.Points(particlesGeometry, particlesMaterial);
+        scene.add(particlesMesh);
+        camera.position.z = 0;
+
+        // Manejar redimensionamiento
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            resizeCanvas();
+        });
+
+        // --- INICIALIZACIÓN DE MEDIAPIPE ---
+        async function initMediaPipe() {
+            try {
+                const vision = await FilesetResolver.forVisionTasks(
+                    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.12/wasm"
+                );
+
+                imageSegmenter = await ImageSegmenter.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite",
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    outputCategoryMask: true,
+                    outputConfidenceMasks: false
+                });
+
+                // Configurar FaceLandmarker para detectar atención
+                faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
+                    baseOptions: {
+                        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+                        delegate: "GPU"
+                    },
+                    runningMode: "VIDEO",
+                    numFaces: 1
+                });
+
+                statusText.innerText = "Sistemas IA preparados.";
+                startBtn.disabled = false;
+                startBtn.innerText = "Activar Espejo Mágico";
+            } catch (error) {
+                statusText.innerText = "Error cargando modelos: " + error.message;
+                console.error(error);
+            }
+        }
+
+        initMediaPipe();
+
+        // --- CONTROL DE CÁMARA Y APLICACIÓN ---
+        startBtn.addEventListener('click', async () => {
+            if (isPlaying) {
+                stopApp();
+                return;
+            }
+            startBtn.innerText = "Iniciando...";
+            startBtn.disabled = true;
+
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" }
+                });
+                
+                video.srcObject = stream;
+                video.addEventListener('loadeddata', () => {
+                    isPlaying = true;
+                    startBtn.innerText = "Detener Espejo";
+                    startBtn.disabled = false;
+                    statusText.innerText = "Escaneando entorno...";
+                    
+                    resizeCanvas();
+                    initOffscreenCanvas();
+                    
+                    // Iniciar bucle principal
+                    requestAnimationFrame(renderLoop);
+                });
+            } catch (err) {
+                statusText.innerText = "Error acceso a cámara. Revisa permisos.";
+                startBtn.disabled = false;
+                startBtn.innerText = "Reintentar";
+            }
+        });
+
+        function stopApp() {
+            isPlaying = false;
+            const stream = video.srcObject;
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            video.srcObject = null;
+            startBtn.innerText = "Activar Espejo Mágico";
+            statusText.innerText = "Sistema en pausa";
+            
+            userCtx.clearRect(0, 0, userCanvas.width, userCanvas.height);
+            threeCanvas.style.opacity = 0;
+            
+            attentiveIndicator.className = "attentive-indicator";
+            attentiveIndicator.innerText = "Esperando cámara...";
+        }
+
+        function resizeCanvas() {
+            if (video.videoWidth === 0) return;
+            // Ajustar al tamaño real de la cámara
+            userCanvas.width = video.videoWidth;
+            userCanvas.height = video.videoHeight;
+            // Hacer que ocupe toda la pantalla manteniendo la proporción
+            userCanvas.style.width = '100vw';
+            userCanvas.style.height = '100vh';
+        }
+
+        function initOffscreenCanvas() {
+            if (!offscreenCanvas) {
+                offscreenCanvas = document.createElement('canvas');
+                offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
+            }
+            offscreenCanvas.width = video.videoWidth;
+            offscreenCanvas.height = video.videoHeight;
+        }
+
+        // --- BUCLE PRINCIPAL (RENDER LOOP) ---
+        function renderLoop() {
+            if (!isPlaying) return;
+
+            // 1. Animar entorno Three.js (Partículas levitando)
+            particlesMesh.rotation.y += 0.0005;
+            particlesMesh.rotation.x += 0.0002;
+            const time = Date.now() * 0.001;
+            particlesMesh.position.y = Math.sin(time * 0.5) * 0.2; // Flotación suave
+            
+            renderer.render(scene, camera);
+
+            // 2. Procesamiento de IA (Segmentación y Rostro)
+            const startTimeMs = performance.now();
+            if (lastVideoTime !== video.currentTime) {
+                lastVideoTime = video.currentTime;
+                
+                // Segmentación de fondo
+                imageSegmenter.segmentForVideo(video, startTimeMs, (result) => {
+                    segmentationResult = result;
+                });
+
+                // Detección de atención
+                const faceResults = faceLandmarker.detectForVideo(video, startTimeMs);
+                checkAttention(faceResults);
+            }
+
+            // 3. Composición visual del Espejo
+            drawSegmentedUser();
+
+            // 4. Actualizar estado visual
+            updateUIState();
+
+            // Llamar al siguiente frame
+            requestAnimationFrame(renderLoop);
+        }
+
+        // Variables para suavizar el movimiento de la cabeza
+        let smoothRatio = 1.0;
+        let smoothPitch = 0.0;
+        let attentionFrames = 0; // Para evitar parpadeos (debounce)
+
+        function checkAttention(faceResults) {
+            if (faceResults && faceResults.faceLandmarks && faceResults.faceLandmarks.length > 0) {
+                const landmarks = faceResults.faceLandmarks[0];
+                
+                // Referencias clave
+                const nose = landmarks[1];
+                const leftCheek = landmarks[234];
+                const rightCheek = landmarks[454];
+                const topHead = landmarks[10];
+                const bottomChin = landmarks[152];
+
+                // Calcular rotación horizontal (Yaw)
+                const leftDist = Math.abs(nose.x - leftCheek.x);
+                const rightDist = Math.abs(nose.x - rightCheek.x);
+                let horizontalRatio = 1;
+                if (rightDist > 0) horizontalRatio = leftDist / rightDist;
+
+                // Calcular inclinación vertical (Pitch)
+                const verticalCenter = (topHead.y + bottomChin.y) / 2;
+                const pitchDeviation = Math.abs(nose.y - verticalCenter);
+
+                // Suavizado exponencial (Filtro paso bajo) para eliminar temblores/parpadeos en la detección
+                smoothRatio = smoothRatio * 0.7 + horizontalRatio * 0.3;
+                smoothPitch = smoothPitch * 0.7 + pitchDeviation * 0.3;
+
+                // Criterios de atención: Mira hacia el frente (rango tolerante) y cabeza no muy inclinada
+                const isLookingForward = (smoothRatio >= 0.55 && smoothRatio <= 1.8) && (smoothPitch < 0.07);
+                
+                if (isLookingForward) {
+                    attentionFrames++;
+                    if (attentionFrames > 5) isAttentive = true; // Requiere 5 frames seguidos mirando para activar
+                } else {
+                    attentionFrames = 0;
+                    isAttentive = false;
+                }
+            } else {
+                // Si no hay rostro detectado
+                attentionFrames = 0;
+                isAttentive = false;
+            }
+        }
+
+        function updateUIState() {
+            if (isAttentive) {
+                // Mostrar entorno inmersivo
+                threeCanvas.style.opacity = 1;
+                attentiveIndicator.className = "attentive-indicator active";
+                attentiveIndicator.innerText = "Inmersión Activa";
+                statusText.innerText = "Usuario prestando atención";
+            } else {
+                // Ocultar entorno, mostrar negro (fondo css)
+                threeCanvas.style.opacity = 0;
+                attentiveIndicator.className = "attentive-indicator";
+                attentiveIndicator.innerText = "Atención Perdida";
+                statusText.innerText = "Mira la pantalla para activar el fondo";
+            }
+        }
+
+        function drawSegmentedUser() {
+            if (!segmentationResult || !segmentationResult.categoryMask) return;
+            
+            const w = userCanvas.width;
+            const h = userCanvas.height;
+
+            // Limpiar canvas final
+            userCtx.save();
+            userCtx.clearRect(0, 0, w, h);
+
+            // Efecto Espejo opcional
+            if (mirrorCamera) {
+                userCtx.translate(w, 0);
+                userCtx.scale(-1, 1);
+            }
+
+            // Procesar la máscara de MediaPipe (Usamos CategoryMask para máxima compatibilidad)
+            const mask = segmentationResult.categoryMask;
+            if (!mask) return;
+            
+            const maskW = mask.width || w;
+            const maskH = mask.height || h;
+            
+            if (offscreenCanvas.width !== maskW || offscreenCanvas.height !== maskH) {
+                offscreenCanvas.width = maskW;
+                offscreenCanvas.height = maskH;
+            }
+            
+            const maskData = mask.getAsUint8Array ? mask.getAsUint8Array() : null;
+            
+            if (maskData) {
+                const imgData = offscreenCtx.createImageData(maskW, maskH);
+                for (let i = 0; i < maskData.length; i++) {
+                    // Si invertMask es true, 0 es la persona. Si es false, >0 es la persona.
+                    const isForeground = invertMask ? (maskData[i] === 0) : (maskData[i] > 0);
+                    imgData.data[i * 4] = 0;     // R
+                    imgData.data[i * 4 + 1] = 0; // G
+                    imgData.data[i * 4 + 2] = 0; // B
+                    imgData.data[i * 4 + 3] = isForeground ? 255 : 0; // Alpha
+                }
+                offscreenCtx.putImageData(imgData, 0, 0);
+            } else {
+                // Fallback directo
+                offscreenCtx.drawImage(mask, 0, 0, maskW, maskH);
+            }
+
+            // 1. Dibujar el video original en el canvas principal
+            userCtx.drawImage(video, 0, 0, w, h);
+            
+            // 2. Aplicar "destination-in" para que el video SOLO sea visible donde la máscara es opaca (el usuario)
+            userCtx.globalCompositeOperation = 'destination-in';
+            
+            // Para alta precisión sin confidence masks, usamos un suavizado nativo del canvas
+            userCtx.filter = 'blur(3px)'; 
+            userCtx.drawImage(offscreenCanvas, 0, 0, w, h);
+            
+            // Restaurar estado
+            userCtx.filter = 'none';
+            userCtx.restore();
+        }
+
+    </script>
 </body>
 </html>
